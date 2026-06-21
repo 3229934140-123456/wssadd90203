@@ -31,7 +31,8 @@ interface AppState {
   updateCustomer: (id: string, data: Partial<Customer>) => void;
   deleteCustomer: (id: string) => void;
   
-  sendFollowUp: (followUpId: string, channel: 'sms' | 'wechat' | 'phone', templateId?: string) => void;
+  sendFollowUp: (followUpId: string, channel: 'sms' | 'wechat' | 'phone', templateId?: string, phoneCallContent?: string) => void;
+  batchSendFollowUps: (customerIds: string[], channel: 'sms' | 'wechat', templateId: string) => void;
   markFollowUpRead: (followUpId: string) => void;
   completeFollowUp: (followUpId: string, note?: string) => void;
   
@@ -103,11 +104,11 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      sendFollowUp: (followUpId, channel, templateId) => {
+      sendFollowUp: (followUpId, channel, templateId, phoneCallContent) => {
         set((state) => ({
           followUps: state.followUps.map(f =>
             f.id === followUpId
-              ? { ...f, status: 'sent', channel, sentAt: new Date().toISOString(), templateId }
+              ? { ...f, status: 'sent', channel, sentAt: new Date().toISOString(), templateId, phoneCallContent }
               : f
           )
         }));
@@ -117,14 +118,53 @@ export const useAppStore = create<AppState>()(
         const followUp = get().followUps.find(f => f.id === followUpId);
         const customer = get().customers.find(c => c.id === followUp?.customerId);
         if (customer) {
+          const channelName = channel === 'sms' ? '短信' : channel === 'wechat' ? '微信' : '电话';
+          let logDetails = `通过${channelName}发送术后第${followUp?.dayNumber}天提醒`;
+          if (channel === 'phone' && phoneCallContent) {
+            logDetails += `，通话内容：${phoneCallContent}`;
+          }
           get().addOperationLog({
             staffId: get().currentUser.id,
             staffName: get().currentUser.name,
-            action: '发送随访提醒',
+            action: channel === 'phone' ? '电话随访' : '发送随访提醒',
             target: customer.name,
-            details: `通过${channel === 'sms' ? '短信' : channel === 'wechat' ? '微信' : '电话'}发送术后第${followUp?.dayNumber}天提醒`
+            details: logDetails
           });
         }
+      },
+
+      batchSendFollowUps: (customerIds, channel, templateId) => {
+        const batchId = generateId();
+        const now = new Date().toISOString();
+        let affectedCount = 0;
+        const affectedCustomerNames: string[] = [];
+        
+        set((state) => ({
+          followUps: state.followUps.map(f => {
+            if (customerIds.includes(f.customerId) && f.status === 'pending') {
+              const customer = state.customers.find(c => c.id === f.customerId);
+              if (customer) {
+                affectedCount++;
+                if (!affectedCustomerNames.includes(customer.name)) {
+                  affectedCustomerNames.push(customer.name);
+                }
+              }
+              return { ...f, status: 'sent', channel, sentAt: now, templateId, batchSendId: batchId };
+            }
+            return f;
+          })
+        }));
+        if (templateId) {
+          get().incrementTemplateUse(templateId);
+        }
+        const template = get().templates.find(t => t.id === templateId);
+        get().addOperationLog({
+          staffId: get().currentUser.id,
+          staffName: get().currentUser.name,
+          action: '批量发送提醒',
+          target: `${affectedCount}位顾客`,
+          details: `使用【${template?.name || '节假日模板'}】通过${channel === 'sms' ? '短信' : '微信'}批量发送给：${affectedCustomerNames.join('、')}`
+        });
       },
 
       markFollowUpRead: (followUpId) => {

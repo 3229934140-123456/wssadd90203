@@ -38,7 +38,8 @@ export default function SendMessageModal({ isOpen, onClose, customer, followUp }
   };
 
   const handleSend = () => {
-    sendFollowUp(followUp.id, selectedChannel, selectedTemplate || undefined);
+    const phoneContent = selectedChannel === 'phone' ? messageContent : undefined;
+    sendFollowUp(followUp.id, selectedChannel, selectedTemplate || undefined, phoneContent);
     setIsSent(true);
     setTimeout(() => {
       setIsSent(false);
@@ -89,7 +90,13 @@ export default function SendMessageModal({ isOpen, onClose, customer, followUp }
                     return (
                       <button
                         key={channel.id}
-                        onClick={() => setSelectedChannel(channel.id)}
+                        onClick={() => {
+                          setSelectedChannel(channel.id);
+                          if (channel.id === 'phone') {
+                            setSelectedTemplate('');
+                            setMessageContent('');
+                          }
+                        }}
                         className={`p-3 rounded-xl border-2 transition-all text-center ${
                           selectedChannel === channel.id
                             ? 'border-blue-500 bg-blue-50'
@@ -140,13 +147,17 @@ export default function SendMessageModal({ isOpen, onClose, customer, followUp }
 
               {selectedChannel === 'phone' && (
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">通话记录</label>
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">
+                    <Phone className="w-4 h-4 inline mr-1.5 text-purple-500" />
+                    通话记录（必填，保存后其他员工可查看）
+                  </label>
                   <textarea
                     value={messageContent}
                     onChange={(e) => setMessageContent(e.target.value)}
-                    className="w-full h-24 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                    placeholder="请记录通话内容..."
+                    className="w-full h-32 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                    placeholder="请详细记录通话内容：&#10;1. 顾客恢复情况反馈&#10;2. 忌口注意事项提醒&#10;3. 顾客疑问及解答&#10;4. 后续需要跟进的事项"
                   />
+                  <p className="text-xs text-gray-400 mt-1.5">💡 记录越详细，后续同事接班时越能了解情况</p>
                 </div>
               )}
             </div>
@@ -160,7 +171,7 @@ export default function SendMessageModal({ isOpen, onClose, customer, followUp }
               </button>
               <button
                 onClick={handleSend}
-                disabled={selectedChannel === 'phone' ? false : !messageContent}
+                disabled={!messageContent}
                 className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
               >
                 <Send className="w-4 h-4" />

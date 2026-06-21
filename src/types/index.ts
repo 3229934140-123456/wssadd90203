@@ -35,6 +35,8 @@ export interface FollowUpRecord {
   note: string;
   templateId?: string;
   operatorId?: string;
+  phoneCallContent?: string;
+  batchSendId?: string;
 }
 
 export interface ExceptionRecord {
