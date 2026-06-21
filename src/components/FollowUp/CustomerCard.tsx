@@ -6,7 +6,8 @@ import {
   MessageSquare,
   Phone,
   Mail,
-  MoreVertical
+  MoreVertical,
+  History
 } from 'lucide-react';
 import type { Customer, FollowUpRecord, ExceptionRecord, RiskLevel } from '@/types';
 import { getCurrentPhase, formatDateTime } from '@/utils';
@@ -17,6 +18,7 @@ interface CustomerCardProps {
   exceptions: ExceptionRecord[];
   onSendMessage: (followUpId: string) => void;
   onMarkException: (customer: Customer) => void;
+  onViewTimeline: (customer: Customer) => void;
   showCheckbox?: boolean;
   isSelected?: boolean;
   onToggleSelect?: () => void;
@@ -34,6 +36,7 @@ export default function CustomerCard({
   exceptions,
   onSendMessage,
   onMarkException,
+  onViewTimeline,
   showCheckbox,
   isSelected,
   onToggleSelect
@@ -219,13 +222,32 @@ export default function CustomerCard({
             )}
           </button>
           <div className="flex items-center gap-1">
-            <button className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewTimeline(customer);
+              }}
+              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title="查看随访时间线"
+            >
+              <History className="w-4 h-4" />
+            </button>
+            <button 
+              className="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+              title="电话跟进"
+            >
               <Phone className="w-4 h-4" />
             </button>
-            <button className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors">
+            <button 
+              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+              title="发送短信"
+            >
               <Mail className="w-4 h-4" />
             </button>
-            <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+            <button 
+              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              title="更多操作"
+            >
               <MoreVertical className="w-4 h-4" />
             </button>
           </div>

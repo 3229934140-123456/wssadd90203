@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -7,7 +8,8 @@ import {
   BarChart3,
   UserCog,
   Heart,
-  Bell
+  Bell,
+  AlertCircle
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 
@@ -22,7 +24,21 @@ const navItems = [
 
 export default function Sidebar() {
   const location = useLocation();
-  const { currentUser } = useAppStore();
+  const { currentUser, getOverdueHighRiskExceptions, getAssignedExceptions } = useAppStore();
+  const [overdueCount, setOverdueCount] = useState(0);
+  const [myTaskCount, setMyTaskCount] = useState(0);
+
+  useEffect(() => {
+    const updateCounts = () => {
+      setOverdueCount(getOverdueHighRiskExceptions().length);
+      if (currentUser.role === 'doctor') {
+        setMyTaskCount(getAssignedExceptions().length);
+      }
+    };
+    updateCounts();
+    const timer = setInterval(updateCounts, 15000);
+    return () => clearInterval(timer);
+  }, [getOverdueHighRiskExceptions, getAssignedExceptions, currentUser.role]);
 
   const roleLabels: Record<string, string> = {
     nurse: '护士',
@@ -45,6 +61,38 @@ export default function Sidebar() {
         </div>
       </div>
 
+      {overdueCount > 0 && (
+        <div className="mx-4 my-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5 animate-pulse" />
+            <div>
+              <p className="text-xs font-bold text-red-700">
+                ⚠️ {overdueCount}条高风险超时
+              </p>
+              <p className="text-xs text-red-600 mt-0.5">
+                超过30分钟未处理，请尽快跟进
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {currentUser.role === 'doctor' && myTaskCount > 0 && (
+        <div className="mx-4 mb-3 p-3 bg-purple-50 border border-purple-200 rounded-xl">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-purple-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-bold text-purple-700">
+                👨‍⚕️ {myTaskCount}条待您处理
+              </p>
+              <p className="text-xs text-purple-600 mt-0.5">
+                请前往异常处理页查看
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <nav className="flex-1 p-4">
         <ul className="space-y-1">
           {navItems.map((item) => {
@@ -61,11 +109,20 @@ export default function Sidebar() {
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                 >
-                  <Icon className="w-5 h-5" />
+                  <Icon className={`w-5 h-5 ${item.path === '/exceptions' && overdueCount > 0 ? 'text-red-500' : ''}`} />
                   {item.label}
-                  {item.path === '/exceptions' && (
-                    <span className="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
-                      3
+                  {item.path === '/exceptions' && (overdueCount > 0 || myTaskCount > 0) && (
+                    <span className={`ml-auto ${
+                      overdueCount > 0
+                        ? 'bg-red-500 text-white animate-pulse'
+                        : 'bg-purple-500 text-white'
+                    } text-xs px-2 py-0.5 rounded-full`}>
+                      {overdueCount > 0 ? overdueCount : myTaskCount}
+                    </span>
+                  )}
+                  {currentUser.role === 'doctor' && item.path === '/exceptions' && myTaskCount > 0 && (
+                    <span className="ml-1 bg-purple-500 text-white text-xs px-2 py-0.5 rounded-full">
+                      我的{myTaskCount}
                     </span>
                   )}
                 </NavLink>
@@ -86,8 +143,13 @@ export default function Sidebar() {
             <p className="text-sm font-medium text-gray-900 truncate">{currentUser.name}</p>
             <p className="text-xs text-gray-500">{roleLabels[currentUser.role]}</p>
           </div>
-          <button className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">
+          <button className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-lg transition-colors relative">
             <Bell className="w-4 h-4" />
+            {overdueCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center animate-pulse">
+                !
+              </span>
+            )}
           </button>
         </div>
       </div>

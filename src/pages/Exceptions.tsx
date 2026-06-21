@@ -1,16 +1,58 @@
-import { useState } from 'react';
-import { AlertTriangle, Clock, CheckCircle2, User, Calendar, MessageSquare, Filter } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { 
+  AlertTriangle, 
+  Clock, 
+  CheckCircle2, 
+  User, 
+  Calendar, 
+  MessageSquare, 
+  Filter,
+  Stethoscope,
+  Users,
+  History,
+  History as ClockIcon,
+  BellRing,
+  ChevronDown,
+  ChevronUp,
+  FolderClock
+} from 'lucide-react';
 import PageHeader from '@/components/Layout/PageHeader';
 import { useAppStore } from '@/store/appStore';
-import { formatDateTime } from '@/utils';
-import type { RiskLevel, ExceptionStatus } from '@/types';
+import { formatDateTime, getDaysAfterSurgery } from '@/utils';
+import type { RiskLevel, ExceptionStatus, Customer } from '@/types';
+import CustomerTimelineModal from '@/components/FollowUp/CustomerTimelineModal';
+
+type ViewMode = 'all' | 'mine';
 
 export default function Exceptions() {
-  const { exceptions, customers, staff, assignException, resolveException } = useAppStore();
+  const { 
+    exceptions, 
+    customers, 
+    staff, 
+    assignException, 
+    resolveException,
+    getAssignedExceptions,
+    currentUser,
+    getOverdueHighRiskExceptions
+  } = useAppStore();
+  
   const [filterLevel, setFilterLevel] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedException, setSelectedException] = useState<string | null>(null);
   const [resolution, setResolution] = useState('');
+  const [viewMode, setViewMode] = useState<ViewMode>('all');
+  const [sortBy, setSortBy] = useState<'level' | 'time'>('level');
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [timelineCustomer, setTimelineCustomer] = useState<Customer | null>(null);
+  const [overdueCount, setOverdueCount] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setOverdueCount(getOverdueHighRiskExceptions().length);
+    }, 10000);
+    setOverdueCount(getOverdueHighRiskExceptions().length);
+    return () => clearInterval(timer);
+  }, [getOverdueHighRiskExceptions]);
 
   const levelConfig: Record<RiskLevel, { label: string; color: string; bgColor: string }> = {
     low: { label: '低风险', color: 'text-green-600', bgColor: 'bg-green-100' },
@@ -24,10 +66,33 @@ export default function Exceptions() {
     resolved: { label: '已解决', color: 'text-green-600', icon: CheckCircle2 }
   };
 
-  const filteredExceptions = exceptions.filter(e => {
-    const matchLevel = filterLevel === 'all' || e.level === filterLevel;
-    const matchStatus = filterStatus === 'all' || e.status === filterStatus;
-    return matchLevel && matchStatus;
+  const getWaitTime = (createdAt: string) => {
+    const diff = Date.now() - new Date(createdAt).getTime();
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 0) return `${hours}小时${minutes}分`;
+    return `${minutes}分钟`;
+  };
+
+  const isOverdueHighRisk = (exception: any) => {
+    const diff = Date.now() - new Date(exception.createdAt).getTime();
+    return exception.level === 'high' && diff > 30 * 60 * 1000; // 30分钟
+  };
+
+  const displayExceptions = viewMode === 'mine' 
+    ? getAssignedExceptions()
+    : exceptions.filter(e => {
+        const matchLevel = filterLevel === 'all' || e.level === filterLevel;
+        const matchStatus = filterStatus === 'all' || e.status === filterStatus;
+        return matchLevel && matchStatus;
+      });
+
+  const sortedExceptions = [...displayExceptions].sort((a, b) => {
+    if (sortBy === 'level') {
+      const levelOrder = { high: 0, medium: 1, low: 2 };
+      return levelOrder[a.level] - levelOrder[b.level];
+    }
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
   });
 
   const getCustomer = (customerId: string) => customers.find(c => c.id === customerId);
@@ -45,8 +110,17 @@ export default function Exceptions() {
     }
   };
 
+  const openTimeline = (customer: Customer) => {
+    setTimelineCustomer(customer);
+    setShowTimeline(true);
+  };
+
   const selectedExceptionData = exceptions.find(e => e.id === selectedException);
   const selectedCustomer = selectedExceptionData ? getCustomer(selectedExceptionData.customerId) : null;
+
+  const isDoctor = currentUser.role === 'doctor';
+
+  const mineCount = getAssignedExceptions().length;
 
   return (
     <div className="min-h-screen">
@@ -55,45 +129,136 @@ export default function Exceptions() {
         subtitle="管理顾客异常反馈，跟踪处理进度"
       />
 
-      <div className="p-8">
+      {overdueCount > 0 && (
+        <div className="mx-8 -mt-4 mb-6 p-4 bg-red-50 border-2 border-red-300 rounded-xl flex items-center gap-4 animate-pulse">
+          <div className="w-12 h-12 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0">
+            <BellRing className="w-6 h-6 text-white" />
+          </div>
+          <div className="flex-1">
+            <p className="font-bold text-red-700 text-lg">⚠️ 有 {overdueCount} 条高风险异常超时未处理！</p>
+            <p className="text-sm text-red-600">高风险异常超过30分钟未处理，请立即跟进</p>
+          </div>
+          <button
+            onClick={() => { setViewMode('all'); setFilterLevel('high'); setFilterStatus('all'); }}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            立即查看
+          </button>
+        </div>
+      )}
+
+      <div className="p-8 pt-4">
         <div className="flex gap-6">
           <div className="flex-1">
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="p-4 border-b border-gray-200 flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Filter className="w-4 h-4 text-gray-400" />
-                  <select
-                    value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="all">全部状态</option>
-                    <option value="pending">待处理</option>
-                    <option value="processing">处理中</option>
-                    <option value="resolved">已解决</option>
-                  </select>
+              <div className="p-4 border-b border-gray-200">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setViewMode('all')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                        viewMode === 'all'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <Users className="w-4 h-4" />
+                      全部异常
+                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-white/20">
+                        {exceptions.length}
+                      </span>
+                    </button>
+                    {isDoctor && (
+                      <button
+                        onClick={() => setViewMode('mine')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                          viewMode === 'mine'
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        <Stethoscope className="w-4 h-4" />
+                        我的任务
+                        {mineCount > 0 && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-500 text-white animate-pulse">
+                            {mineCount}
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500">排序：</span>
+                    <button
+                      onClick={() => setSortBy(sortBy === 'level' ? 'time' : 'level')}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1"
+                    >
+                      {sortBy === 'level' ? (
+                        <>
+                          <AlertTriangle className="w-3.5 h-3.5 text-orange-500" />
+                          按风险等级
+                          <ChevronDown className="w-3 h-3" />
+                        </>
+                      ) : (
+                        <>
+                          <ClockIcon className="w-3.5 h-3.5 text-blue-500" />
+                          按等待时长
+                          <ChevronUp className="w-3 h-3" />
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-gray-400" />
-                  <select
-                    value={filterLevel}
-                    onChange={(e) => setFilterLevel(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="all">全部风险</option>
-                    <option value="low">低风险</option>
-                    <option value="medium">中风险</option>
-                    <option value="high">高风险</option>
-                  </select>
-                </div>
+
+                {viewMode === 'all' && (
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Filter className="w-4 h-4 text-gray-400" />
+                      <select
+                        value={filterStatus}
+                        onChange={(e) => setFilterStatus(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="all">全部状态</option>
+                        <option value="pending">待处理</option>
+                        <option value="processing">处理中</option>
+                        <option value="resolved">已解决</option>
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-gray-400" />
+                      <select
+                        value={filterLevel}
+                        onChange={(e) => setFilterLevel(e.target.value)}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="all">全部风险</option>
+                        <option value="high">🔴 高风险</option>
+                        <option value="medium">🟠 中风险</option>
+                        <option value="low">🟢 低风险</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {viewMode === 'mine' && mineCount > 0 && (
+                  <div className="mt-3 p-3 bg-purple-50 rounded-lg border border-purple-100">
+                    <p className="text-sm text-purple-700 font-medium">
+                      👨‍⚕️ {currentUser.name} 医生，您有 {mineCount} 条待处理的异常，请优先处理高风险
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="divide-y divide-gray-100">
-                {filteredExceptions.map(exception => {
+                {sortedExceptions.map(exception => {
                   const customer = getCustomer(exception.customerId);
                   const level = levelConfig[exception.level];
                   const status = statusConfig[exception.status];
                   const StatusIcon = status.icon;
+                  const waitTime = getWaitTime(exception.createdAt);
+                  const overdue = isOverdueHighRisk(exception);
 
                   return (
                     <div
@@ -101,14 +266,14 @@ export default function Exceptions() {
                       onClick={() => setSelectedException(exception.id)}
                       className={`p-4 cursor-pointer transition-colors hover:bg-gray-50 ${
                         selectedException === exception.id ? 'bg-blue-50' : ''
-                      }`}
+                      } ${overdue ? 'bg-red-50/50' : ''}`}
                     >
                       <div className="flex items-start gap-4">
-                        <div className={`w-10 h-10 rounded-full ${level.bgColor} flex items-center justify-center flex-shrink-0`}>
+                        <div className={`w-10 h-10 rounded-full ${level.bgColor} flex items-center justify-center flex-shrink-0 ${overdue ? 'animate-pulse ring-4 ring-red-200' : ''}`}>
                           <AlertTriangle className={`w-5 h-5 ${level.color}`} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="font-medium text-gray-900">{customer?.name || '未知顾客'}</h4>
                             <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${level.bgColor} ${level.color}`}>
                               {level.label}
@@ -117,6 +282,11 @@ export default function Exceptions() {
                               <StatusIcon className="w-3 h-3 inline mr-1" />
                               {status.label}
                             </span>
+                            {overdue && (
+                              <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-red-500 text-white animate-pulse">
+                                已超时
+                              </span>
+                            )}
                           </div>
                           <p className="text-sm text-gray-600 mt-1">{exception.type}</p>
                           <p className="text-sm text-gray-500 mt-1 line-clamp-1">{exception.description}</p>
@@ -124,6 +294,10 @@ export default function Exceptions() {
                             <span className="flex items-center gap-1">
                               <Calendar className="w-3.5 h-3.5" />
                               {formatDateTime(exception.createdAt)}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <FolderClock className="w-3.5 h-3.5" />
+                              等待 {waitTime}
                             </span>
                             {exception.assignedDoctor && (
                               <span className="flex items-center gap-1">
@@ -139,13 +313,17 @@ export default function Exceptions() {
                 })}
               </div>
 
-              {filteredExceptions.length === 0 && (
+              {sortedExceptions.length === 0 && (
                 <div className="py-16 text-center">
                   <div className="w-16 h-16 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
                     <CheckCircle2 className="w-8 h-8 text-gray-400" />
                   </div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-1">暂无异常记录</h3>
-                  <p className="text-sm text-gray-500">所有顾客恢复情况良好</p>
+                  <h3 className="text-lg font-medium text-gray-900 mb-1">
+                    {viewMode === 'mine' ? '暂无待您处理的异常' : '暂无异常记录'}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {viewMode === 'mine' ? '您当前没有需要处理的异常任务' : '所有顾客恢复情况良好'}
+                  </p>
                 </div>
               )}
             </div>
@@ -154,7 +332,19 @@ export default function Exceptions() {
           {selectedExceptionData && selectedCustomer && (
             <div className="w-96">
               <div className="bg-white rounded-xl border border-gray-200 p-6 sticky top-8">
-                <h3 className="font-semibold text-gray-900 mb-4">异常详情</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-gray-900">异常详情</h3>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openTimeline(selectedCustomer);
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 px-2 py-1 rounded hover:bg-blue-50"
+                  >
+                    <Clock className="w-3 h-3" />
+                    查看时间线
+                  </button>
+                </div>
 
                 <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl mb-4">
                   <img
@@ -165,6 +355,7 @@ export default function Exceptions() {
                   <div>
                     <p className="font-medium text-gray-900">{selectedCustomer.name}</p>
                     <p className="text-sm text-gray-500">{selectedCustomer.projectType}</p>
+                    <p className="text-xs text-gray-400">术后第{getDaysAfterSurgery(selectedCustomer.surgeryDate)}天</p>
                   </div>
                 </div>
 
@@ -188,6 +379,12 @@ export default function Exceptions() {
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray-500">上报时间</span>
                     <span className="text-sm text-gray-600">{formatDateTime(selectedExceptionData.createdAt)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">等待时长</span>
+                    <span className="text-sm font-medium text-orange-600">
+                      {getWaitTime(selectedExceptionData.createdAt)}
+                    </span>
                   </div>
                   {selectedExceptionData.assignedDoctor && (
                     <div className="flex items-center justify-between">
@@ -259,6 +456,14 @@ export default function Exceptions() {
           )}
         </div>
       </div>
+
+      {showTimeline && timelineCustomer && (
+        <CustomerTimelineModal
+          isOpen={showTimeline}
+          onClose={() => { setShowTimeline(false); setTimelineCustomer(null); }}
+          customer={timelineCustomer}
+        />
+      )}
     </div>
   );
 }

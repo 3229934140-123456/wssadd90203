@@ -1,8 +1,11 @@
-import { useState } from 'react';
-import { X, Send, CheckCircle2, Users, MessageCircle, Mail, Layers } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { 
+  X, Send, CheckCircle2, Users, MessageCircle, Mail, Layers,
+  AlertCircle, CheckCircle, XCircle
+} from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { getDaysAfterSurgery } from '@/utils';
-import type { Customer } from '@/types';
+import type { Customer, BatchSendResponse } from '@/types';
 
 interface BatchSendModalProps {
   isOpen: boolean;
@@ -11,11 +14,24 @@ interface BatchSendModalProps {
 }
 
 export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds = [] }: BatchSendModalProps) {
-  const { customers, templates, batchSendFollowUps } = useAppStore();
-  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set(preselectedCustomerIds));
+  const { customers, templates, batchSendFollowUps, preselectedBatchCustomerIds } = useAppStore();
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
   const [selectedChannel, setSelectedChannel] = useState<'sms' | 'wechat'>('wechat');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [sendResult, setSendResult] = useState<BatchSendResponse | null>(null);
   const [isSent, setIsSent] = useState(false);
+
+  // 从Store中读取预选记忆，打开弹窗时自动选中
+  useEffect(() => {
+    if (isOpen) {
+      const idsToUse = preselectedCustomerIds.length > 0 
+        ? preselectedCustomerIds 
+        : preselectedBatchCustomerIds;
+      setSelectedCustomerIds(new Set(idsToUse));
+      setIsSent(false);
+      setSendResult(null);
+    }
+  }, [isOpen, preselectedCustomerIds, preselectedBatchCustomerIds]);
 
   if (!isOpen) return null;
 
@@ -30,8 +46,7 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
   const otherTemplates = templates.filter(t => !holidayTemplates.includes(t));
   const templateList = holidayTemplates.length > 0 ? holidayTemplates : otherTemplates;
 
-  if (templateList.length > 0 && !selectedTemplateId) {
-    // 默认选中第一个节假日模板
+  if (templateList.length > 0 && !selectedTemplateId && !isSent) {
     setSelectedTemplateId(templateList[0].id);
   }
 
@@ -47,6 +62,11 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
     });
   };
 
+  const handleCheckboxClick = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    toggleCustomer(id);
+  };
+
   const toggleAll = () => {
     if (selectedCustomerIds.size === recoveryCustomers.length) {
       setSelectedCustomerIds(new Set());
@@ -57,13 +77,16 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
 
   const handleSend = () => {
     if (selectedCustomerIds.size === 0 || !selectedTemplateId) return;
-    batchSendFollowUps(Array.from(selectedCustomerIds), selectedChannel, selectedTemplateId);
+    const result = batchSendFollowUps(Array.from(selectedCustomerIds), selectedChannel, selectedTemplateId);
+    setSendResult(result);
     setIsSent(true);
-    setTimeout(() => {
-      setIsSent(false);
-      setSelectedCustomerIds(new Set());
-      onClose();
-    }, 2000);
+  };
+
+  const handleClose = () => {
+    setIsSent(false);
+    setSendResult(null);
+    setSelectedCustomerIds(new Set());
+    onClose();
   };
 
   const selectedTemplate = templates.find(t => t.id === selectedTemplateId);
@@ -76,9 +99,11 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
       .replace('{doctor}', customer.doctorName);
   };
 
+  const channelName = selectedChannel === 'wechat' ? '微信小程序' : '短信';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={handleClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 overflow-hidden max-h-[85vh] flex flex-col">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-amber-50 to-orange-50">
           <div className="flex items-center gap-3">
@@ -91,22 +116,95 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 hover:bg-white/60 rounded-lg transition-colors text-gray-400 hover:text-gray-600"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {isSent ? (
-          <div className="p-16 text-center">
-            <div className="w-20 h-20 mx-auto bg-green-100 rounded-full flex items-center justify-center mb-5">
-              <CheckCircle2 className="w-10 h-10 text-green-600" />
+        {isSent && sendResult ? (
+          <div className="p-10 text-center overflow-y-auto flex-1">
+            <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-5 ${
+              sendResult.failCount === 0 
+                ? 'bg-green-100' 
+                : sendResult.successCount === 0 
+                  ? 'bg-red-100' 
+                  : 'bg-amber-100'
+            }`}>
+              {sendResult.failCount === 0 ? (
+                <CheckCircle2 className="w-10 h-10 text-green-600" />
+              ) : sendResult.successCount === 0 ? (
+                <AlertCircle className="w-10 h-10 text-red-600" />
+              ) : (
+                <CheckCircle2 className="w-10 h-10 text-amber-600" />
+              )}
             </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">批量发送成功</h3>
-            <p className="text-sm text-gray-500">
-              已向 {selectedCustomerIds.size} 位顾客发送{selectedChannel === 'wechat' ? '微信小程序' : '短信'}提醒
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">
+              {sendResult.failCount === 0 
+                ? '全部发送成功' 
+                : sendResult.successCount === 0 
+                  ? '发送失败' 
+                  : '部分发送成功'}
+            </h3>
+            <p className="text-sm text-gray-500 mb-6">
+              已尝试向 {selectedCustomerIds.size} 位顾客发送{channelName}提醒
             </p>
+
+            <div className="flex justify-center gap-8 mb-8">
+              <div className="text-center">
+                <div className="w-16 h-16 mx-auto bg-green-100 rounded-full flex items-center justify-center mb-2">
+                  <CheckCircle className="w-8 h-8 text-green-600" />
+                </div>
+                <p className="text-2xl font-bold text-green-600">{sendResult.successCount}</p>
+                <p className="text-xs text-gray-500">发送成功</p>
+              </div>
+              <div className="text-center">
+                <div className="w-16 h-16 mx-auto bg-red-100 rounded-full flex items-center justify-center mb-2">
+                  <XCircle className="w-8 h-8 text-red-600" />
+                </div>
+                <p className="text-2xl font-bold text-red-600">{sendResult.failCount}</p>
+                <p className="text-xs text-gray-500">发送失败</p>
+              </div>
+            </div>
+
+            <div className="text-left">
+              <p className="text-sm font-medium text-gray-700 mb-3">发送明细：</p>
+              <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-xl">
+                {sendResult.results.map((result, idx) => (
+                  <div 
+                    key={idx} 
+                    className={`flex items-center justify-between px-4 py-2.5 border-b border-gray-100 last:border-0 ${
+                      result.success ? 'bg-white' : 'bg-red-50'
+                    }`}
+                  >
+                    <span className="text-sm text-gray-700">{result.customerName}</span>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                      result.success 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-red-100 text-red-700'
+                    }`}>
+                      {result.success ? '✓ 已发送' : '✗ 失败'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-8 flex justify-center gap-3">
+              <button
+                onClick={handleClose}
+                className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors"
+              >
+                关闭
+              </button>
+              <button
+                onClick={() => { setIsSent(false); setSendResult(null); }}
+                className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                继续发送
+              </button>
+            </div>
           </div>
         ) : (
           <>
@@ -200,28 +298,29 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
                           <div
                             key={customer.id}
                             onClick={() => toggleCustomer(customer.id)}
-                            className={`p-3 flex items-center gap-3 cursor-pointer transition-colors ${
+                            className={`p-3 flex items-center gap-3 cursor-pointer transition-colors select-none ${
                               isChecked ? 'bg-blue-50' : 'hover:bg-gray-50'
                             }`}
                           >
                             <input
                               type="checkbox"
                               checked={isChecked}
-                              onChange={() => toggleCustomer(customer.id)}
-                              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              onClick={(e) => handleCheckboxClick(e, customer.id)}
+                              onChange={() => {}}
+                              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                             />
                             <img
                               src={customer.avatar}
                               alt={customer.name}
-                              className="w-9 h-9 rounded-full bg-gray-100"
+                              className="w-9 h-9 rounded-full bg-gray-100 pointer-events-none"
                             />
-                            <div className="flex-1 min-w-0">
+                            <div className="flex-1 min-w-0 pointer-events-none">
                               <p className="text-sm font-medium text-gray-900">{customer.name}</p>
                               <p className="text-xs text-gray-500">
                                 {customer.projectType} · 术后第{days}天 · 忌口{customer.dietPeriodDays}天
                               </p>
                             </div>
-                            <div className="text-right w-40 flex-shrink-0">
+                            <div className="text-right w-40 flex-shrink-0 pointer-events-none">
                               <p className="text-xs text-gray-500">消息预览：</p>
                               <p className="text-xs text-gray-700 truncate">
                                 {getPreviewContent(customer).slice(0, 20)}...
@@ -250,7 +349,7 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={onClose}
+                  onClick={handleClose}
                   className="px-5 py-2 text-sm font-medium text-gray-600 hover:bg-white rounded-lg transition-colors border border-gray-300"
                 >
                   取消
@@ -271,3 +370,4 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
     </div>
   );
 }
+

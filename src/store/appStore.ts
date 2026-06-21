@@ -6,7 +6,10 @@ import type {
   ExceptionRecord,
   Template,
   Staff,
-  OperationLog
+  OperationLog,
+  TimelineEvent,
+  BatchSendResponse,
+  BatchSendResult
 } from '@/types';
 import {
   mockCustomers,
@@ -26,19 +29,22 @@ interface AppState {
   staff: Staff[];
   operationLogs: OperationLog[];
   currentUser: Staff;
+  preselectedBatchCustomerIds: string[];
   
   addCustomer: (customer: Omit<Customer, 'id' | 'createdAt'>) => void;
   updateCustomer: (id: string, data: Partial<Customer>) => void;
   deleteCustomer: (id: string) => void;
   
   sendFollowUp: (followUpId: string, channel: 'sms' | 'wechat' | 'phone', templateId?: string, phoneCallContent?: string) => void;
-  batchSendFollowUps: (customerIds: string[], channel: 'sms' | 'wechat', templateId: string) => void;
+  batchSendFollowUps: (customerIds: string[], channel: 'sms' | 'wechat', templateId: string) => BatchSendResponse;
   markFollowUpRead: (followUpId: string) => void;
   completeFollowUp: (followUpId: string, note?: string) => void;
   
   addException: (exception: Omit<ExceptionRecord, 'id' | 'createdAt' | 'status'>) => void;
   assignException: (exceptionId: string, doctorId: string) => void;
   resolveException: (exceptionId: string, resolution: string) => void;
+  getAssignedExceptions: (doctorId?: string) => ExceptionRecord[];
+  getOverdueHighRiskExceptions: () => ExceptionRecord[];
   
   addTemplate: (template: Omit<Template, 'id' | 'createdAt' | 'useCount'>) => void;
   updateTemplate: (id: string, data: Partial<Template>) => void;
@@ -46,6 +52,9 @@ interface AppState {
   incrementTemplateUse: (id: string) => void;
   
   addOperationLog: (log: Omit<OperationLog, 'id' | 'timestamp'>) => void;
+  
+  setPreselectedBatchCustomerIds: (ids: string[]) => void;
+  getCustomerTimeline: (customerId: string) => TimelineEvent[];
 }
 
 export const useAppStore = create<AppState>()(
@@ -58,6 +67,7 @@ export const useAppStore = create<AppState>()(
       staff: mockStaff,
       operationLogs: mockOperationLogs,
       currentUser: mockStaff[0],
+      preselectedBatchCustomerIds: [],
 
       addCustomer: (customer) => {
         const newCustomer: Customer = {
@@ -136,24 +146,69 @@ export const useAppStore = create<AppState>()(
       batchSendFollowUps: (customerIds, channel, templateId) => {
         const batchId = generateId();
         const now = new Date().toISOString();
-        let affectedCount = 0;
+        const results: BatchSendResult[] = [];
         const affectedCustomerNames: string[] = [];
         
-        set((state) => ({
-          followUps: state.followUps.map(f => {
+        set((state) => {
+          const newFollowUps: FollowUpRecord[] = [];
+          
+          const updatedFollowUps = state.followUps.map(f => {
             if (customerIds.includes(f.customerId) && f.status === 'pending') {
               const customer = state.customers.find(c => c.id === f.customerId);
               if (customer) {
-                affectedCount++;
+                results.push({
+                  customerId: customer.id,
+                  customerName: customer.name,
+                  success: true
+                });
                 if (!affectedCustomerNames.includes(customer.name)) {
                   affectedCustomerNames.push(customer.name);
                 }
               }
-              return { ...f, status: 'sent', channel, sentAt: now, templateId, batchSendId: batchId };
+              return { ...f, status: 'sent' as const, channel, sentAt: now, templateId, batchSendId: batchId };
             }
             return f;
-          })
-        }));
+          });
+          
+          // 给没有待随访任务的顾客也创建一条记录，方便在时间线中查看
+          const sentCustomerIds = state.followUps
+            .filter(f => customerIds.includes(f.customerId) && f.status === 'pending')
+            .map(f => f.customerId);
+          
+          customerIds.forEach(cid => {
+            if (!sentCustomerIds.includes(cid)) {
+              const customer = state.customers.find(c => c.id === cid);
+              if (customer) {
+                results.push({
+                  customerId: customer.id,
+                  customerName: customer.name,
+                  success: true
+                });
+                affectedCustomerNames.push(customer.name);
+                const days = getDaysAfterSurgery(customer.surgeryDate);
+                newFollowUps.push({
+                  id: generateId(),
+                  customerId: customer.id,
+                  dayNumber: days,
+                  status: 'sent' as const,
+                  channel,
+                  sentAt: now,
+                  isRead: false,
+                  lastCheckIn: null,
+                  note: '',
+                  templateId,
+                  batchSendId: batchId
+                });
+              }
+            }
+          });
+          
+          return {
+            followUps: [...updatedFollowUps, ...newFollowUps],
+            preselectedBatchCustomerIds: []
+          };
+        });
+        
         if (templateId) {
           get().incrementTemplateUse(templateId);
         }
@@ -162,9 +217,15 @@ export const useAppStore = create<AppState>()(
           staffId: get().currentUser.id,
           staffName: get().currentUser.name,
           action: '批量发送提醒',
-          target: `${affectedCount}位顾客`,
+          target: `${results.length}位顾客`,
           details: `使用【${template?.name || '节假日模板'}】通过${channel === 'sms' ? '短信' : '微信'}批量发送给：${affectedCustomerNames.join('、')}`
         });
+        
+        return {
+          results,
+          successCount: results.filter(r => r.success).length,
+          failCount: results.filter(r => !r.success).length
+        };
       },
 
       markFollowUpRead: (followUpId) => {
@@ -272,6 +333,133 @@ export const useAppStore = create<AppState>()(
           timestamp: new Date().toISOString()
         };
         set((state) => ({ operationLogs: [newLog, ...state.operationLogs] }));
+      },
+
+      setPreselectedBatchCustomerIds: (ids) => {
+        set({ preselectedBatchCustomerIds: ids });
+      },
+
+      getAssignedExceptions: (doctorId) => {
+        const targetDoctorId = doctorId || get().currentUser.id;
+        const doctor = get().staff.find(s => s.id === targetDoctorId);
+        if (!doctor) return [];
+        
+        return get().exceptions
+          .filter(e => e.assignedDoctor === doctor.name && e.status !== 'resolved')
+          .sort((a, b) => {
+            const levelOrder = { high: 0, medium: 1, low: 2 };
+            const levelDiff = levelOrder[a.level] - levelOrder[b.level];
+            if (levelDiff !== 0) return levelDiff;
+            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          });
+      },
+
+      getOverdueHighRiskExceptions: () => {
+        const now = new Date().getTime();
+        const HIGH_RISK_OVERDUE_MS = 30 * 60 * 1000; // 高风险30分钟未处理即超时
+        return get().exceptions.filter(e => {
+          if (e.level !== 'high' || e.status === 'resolved') return false;
+          const elapsed = now - new Date(e.createdAt).getTime();
+          return elapsed > HIGH_RISK_OVERDUE_MS;
+        });
+      },
+
+      getCustomerTimeline: (customerId) => {
+        const state = get();
+        const events: TimelineEvent[] = [];
+        const customer = state.customers.find(c => c.id === customerId);
+        if (!customer) return events;
+
+        // 1. 建档事件
+        events.push({
+          id: `create-${customer.id}`,
+          type: 'customer_created',
+          timestamp: customer.createdAt,
+          title: '顾客建档',
+          description: `${customer.projectType}，手术日期：${new Date(customer.surgeryDate).toLocaleDateString('zh-CN')}，忌口周期${customer.dietPeriodDays}天，主治医生：${customer.doctorName}`
+        });
+
+        // 2. 随访记录事件
+        state.followUps
+          .filter(f => f.customerId === customerId && f.sentAt)
+          .forEach(f => {
+            const template = state.templates.find(t => t.id === f.templateId);
+            if (f.batchSendId) {
+              events.push({
+                id: `followup-${f.id}`,
+                type: 'batch_sent',
+                timestamp: f.sentAt!,
+                title: `批量发送提醒（术后第${f.dayNumber}天）`,
+                description: `通过${f.channel === 'sms' ? '短信' : f.channel === 'wechat' ? '微信' : '电话'}发送${template ? `【${template.name}】` : '提醒'}`,
+                metadata: { templateName: template?.name, channel: f.channel }
+              });
+            } else if (f.channel === 'phone') {
+              events.push({
+                id: `followup-${f.id}`,
+                type: 'phone_call',
+                timestamp: f.sentAt!,
+                title: `电话随访（术后第${f.dayNumber}天）`,
+                description: f.phoneCallContent || '已完成电话随访',
+                metadata: { content: f.phoneCallContent }
+              });
+            } else {
+              events.push({
+                id: `followup-${f.id}`,
+                type: 'followup_sent',
+                timestamp: f.sentAt!,
+                title: `发送${f.channel === 'sms' ? '短信' : '微信'}提醒（术后第${f.dayNumber}天）`,
+                description: template ? `模板：${template.name}` : '已发送提醒'
+              });
+            }
+          });
+
+        // 3. 异常记录事件
+        state.exceptions
+          .filter(e => e.customerId === customerId)
+          .forEach(e => {
+            events.push({
+              id: `exception-report-${e.id}`,
+              type: 'exception_reported',
+              timestamp: e.createdAt,
+              title: `异常上报：${e.type}`,
+              description: `风险等级：${e.level === 'low' ? '低' : e.level === 'medium' ? '中' : '高'}，${e.description}`,
+              metadata: { level: e.level }
+            });
+            if (e.assignedDoctor) {
+              events.push({
+                id: `exception-assign-${e.id}`,
+                type: 'exception_assigned',
+                timestamp: e.createdAt,
+                title: '分配医生处理',
+                description: `分配给${e.assignedDoctor}医生处理`
+              });
+            }
+            if (e.status === 'resolved' && e.resolvedAt) {
+              events.push({
+                id: `exception-resolve-${e.id}`,
+                type: 'exception_resolved',
+                timestamp: e.resolvedAt,
+                title: '异常已解决',
+                description: e.resolution
+              });
+            }
+          });
+
+        // 4. 打卡记录
+        state.followUps
+          .filter(f => f.customerId === customerId && f.lastCheckIn)
+          .forEach(f => {
+            events.push({
+              id: `checkin-${f.id}`,
+              type: 'checkin',
+              timestamp: f.lastCheckIn!,
+              title: '顾客打卡',
+              description: `术后第${f.dayNumber}天打卡确认`
+            });
+          });
+
+        // 按时间排序，最新在前
+        return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       }
     }),
     {

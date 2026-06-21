@@ -5,6 +5,7 @@ import CustomerCard from '@/components/FollowUp/CustomerCard';
 import SendMessageModal from '@/components/FollowUp/SendMessageModal';
 import ReportExceptionModal from '@/components/FollowUp/ReportExceptionModal';
 import BatchSendModal from '@/components/FollowUp/BatchSendModal';
+import CustomerTimelineModal from '@/components/FollowUp/CustomerTimelineModal';
 import { useAppStore } from '@/store/appStore';
 import { getDaysAfterSurgery } from '@/utils';
 import type { Customer, FollowUpRecord } from '@/types';
@@ -12,15 +13,28 @@ import type { Customer, FollowUpRecord } from '@/types';
 type TabType = 'day1' | 'day3' | 'day7' | 'all' | 'recovery';
 
 export default function Dashboard() {
+  const { 
+    customers, 
+    followUps, 
+    exceptions, 
+    preselectedBatchCustomerIds,
+    setPreselectedBatchCustomerIds 
+  } = useAppStore();
+
   const [activeTab, setActiveTab] = useState<TabType>('day1');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isExceptionModalOpen, setIsExceptionModalOpen] = useState(false);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [isTimelineModalOpen, setIsTimelineModalOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedFollowUp, setSelectedFollowUp] = useState<FollowUpRecord | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  
-  const { customers, followUps, exceptions } = useAppStore();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
+    // 从Store中读取预选的批量发送顾客ID
+    if (preselectedBatchCustomerIds.length > 0) {
+      return new Set(preselectedBatchCustomerIds);
+    }
+    return new Set();
+  });
 
   const getFollowUpsByDay = (day: number | 'all' | 'recovery') => {
     if (day === 'all') {
@@ -90,6 +104,19 @@ export default function Dashboard() {
     setIsExceptionModalOpen(true);
   };
 
+  const handleViewTimeline = (customer: Customer) => {
+    setSelectedCustomer(customer);
+    setIsTimelineModalOpen(true);
+  };
+
+  const openBatchModal = () => {
+    // 保存当前选中的ID到Store，下次打开时能记住
+    if (selectedIds.size > 0) {
+      setPreselectedBatchCustomerIds(Array.from(selectedIds));
+    }
+    setIsBatchModalOpen(true);
+  };
+
   const toggleSelect = (customerId: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -140,7 +167,7 @@ export default function Dashboard() {
         actions={
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setIsBatchModalOpen(true)}
+              onClick={openBatchModal}
               className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-sm font-medium rounded-lg transition-all shadow-sm"
             >
               <Layers className="w-4 h-4" />
@@ -186,7 +213,7 @@ export default function Dashboard() {
                 取消选择
               </button>
               <button
-                onClick={() => setIsBatchModalOpen(true)}
+                onClick={openBatchModal}
                 className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
               >
                 <Send className="w-4 h-4" />
@@ -251,6 +278,7 @@ export default function Dashboard() {
                     exceptions={exceptions}
                     onSendMessage={handleSendMessage}
                     onMarkException={handleMarkException}
+                    onViewTimeline={handleViewTimeline}
                     showCheckbox={showCheckbox}
                     isSelected={selectedIds.has(customer.id)}
                     onToggleSelect={() => toggleSelect(customer.id)}
@@ -293,6 +321,17 @@ export default function Dashboard() {
         onClose={() => setIsBatchModalOpen(false)}
         preselectedCustomerIds={Array.from(selectedIds)}
       />
+
+      {isTimelineModalOpen && selectedCustomer && (
+        <CustomerTimelineModal
+          isOpen={isTimelineModalOpen}
+          onClose={() => {
+            setIsTimelineModalOpen(false);
+            setSelectedCustomer(null);
+          }}
+          customer={selectedCustomer}
+        />
+      )}
     </div>
   );
 }

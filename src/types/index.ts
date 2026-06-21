@@ -5,6 +5,37 @@ export type FollowUpStatus = 'pending' | 'sent' | 'read' | 'completed';
 export type FollowUpChannel = 'sms' | 'wechat' | 'phone' | null;
 export type RiskLevel = 'low' | 'medium' | 'high';
 export type ExceptionStatus = 'pending' | 'processing' | 'resolved';
+export type TimelineEventType = 
+  | 'customer_created' 
+  | 'followup_sent' 
+  | 'phone_call' 
+  | 'exception_reported' 
+  | 'exception_assigned' 
+  | 'exception_resolved'
+  | 'checkin'
+  | 'batch_sent';
+
+export interface TimelineEvent {
+  id: string;
+  type: TimelineEventType;
+  timestamp: string;
+  title: string;
+  description: string;
+  metadata?: Record<string, any>;
+}
+
+export interface BatchSendResult {
+  customerId: string;
+  customerName: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface BatchSendResponse {
+  results: BatchSendResult[];
+  successCount: number;
+  failCount: number;
+}
 
 export interface Customer {
   id: string;
