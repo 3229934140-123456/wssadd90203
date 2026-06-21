@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { 
   X, Send, CheckCircle2, Users, MessageCircle, Mail, Layers,
-  AlertCircle, CheckCircle, XCircle
+  AlertCircle, CheckCircle, XCircle, ChevronRight, ArrowLeft,
+  FileText, Smile
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { getDaysAfterSurgery } from '@/utils';
@@ -13,22 +14,23 @@ interface BatchSendModalProps {
   preselectedCustomerIds?: string[];
 }
 
+type Step = 'select' | 'confirm' | 'result';
+
 export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds = [] }: BatchSendModalProps) {
   const { customers, templates, batchSendFollowUps, preselectedBatchCustomerIds } = useAppStore();
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
   const [selectedChannel, setSelectedChannel] = useState<'sms' | 'wechat'>('wechat');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [sendResult, setSendResult] = useState<BatchSendResponse | null>(null);
-  const [isSent, setIsSent] = useState(false);
+  const [step, setStep] = useState<Step>('select');
 
-  // 从Store中读取预选记忆，打开弹窗时自动选中
   useEffect(() => {
     if (isOpen) {
       const idsToUse = preselectedCustomerIds.length > 0 
         ? preselectedCustomerIds 
         : preselectedBatchCustomerIds;
       setSelectedCustomerIds(new Set(idsToUse));
-      setIsSent(false);
+      setStep('select');
       setSendResult(null);
     }
   }, [isOpen, preselectedCustomerIds, preselectedBatchCustomerIds]);
@@ -40,13 +42,15 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
     return days > 0 && days <= c.dietPeriodDays;
   });
 
+  const selectedCustomers = recoveryCustomers.filter(c => selectedCustomerIds.has(c.id));
+
   const holidayTemplates = templates.filter(t =>
     t.category === '特殊提醒' || t.name.includes('节假日') || t.name.includes('聚餐')
   );
   const otherTemplates = templates.filter(t => !holidayTemplates.includes(t));
   const templateList = holidayTemplates.length > 0 ? holidayTemplates : otherTemplates;
 
-  if (templateList.length > 0 && !selectedTemplateId && !isSent) {
+  if (templateList.length > 0 && !selectedTemplateId && step === 'select') {
     setSelectedTemplateId(templateList[0].id);
   }
 
@@ -79,11 +83,11 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
     if (selectedCustomerIds.size === 0 || !selectedTemplateId) return;
     const result = batchSendFollowUps(Array.from(selectedCustomerIds), selectedChannel, selectedTemplateId);
     setSendResult(result);
-    setIsSent(true);
+    setStep('result');
   };
 
   const handleClose = () => {
-    setIsSent(false);
+    setStep('select');
     setSendResult(null);
     setSelectedCustomerIds(new Set());
     onClose();
@@ -112,7 +116,11 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-900">批量发送节假日提醒</h2>
-              <p className="text-xs text-gray-500">选择恢复期顾客，使用节假日模板统一发送</p>
+              <p className="text-xs text-gray-500">
+                {step === 'select' && '选择顾客、发送方式和模板'}
+                {step === 'confirm' && '确认发送信息无误'}
+                {step === 'result' && '发送结果'}
+              </p>
             </div>
           </div>
           <button
@@ -123,90 +131,39 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
           </button>
         </div>
 
-        {isSent && sendResult ? (
-          <div className="p-10 text-center overflow-y-auto flex-1">
-            <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-5 ${
-              sendResult.failCount === 0 
-                ? 'bg-green-100' 
-                : sendResult.successCount === 0 
-                  ? 'bg-red-100' 
-                  : 'bg-amber-100'
-            }`}>
-              {sendResult.failCount === 0 ? (
-                <CheckCircle2 className="w-10 h-10 text-green-600" />
-              ) : sendResult.successCount === 0 ? (
-                <AlertCircle className="w-10 h-10 text-red-600" />
-              ) : (
-                <CheckCircle2 className="w-10 h-10 text-amber-600" />
-              )}
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">
-              {sendResult.failCount === 0 
-                ? '全部发送成功' 
-                : sendResult.successCount === 0 
-                  ? '发送失败' 
-                  : '部分发送成功'}
-            </h3>
-            <p className="text-sm text-gray-500 mb-6">
-              已尝试向 {selectedCustomerIds.size} 位顾客发送{channelName}提醒
-            </p>
-
-            <div className="flex justify-center gap-8 mb-8">
-              <div className="text-center">
-                <div className="w-16 h-16 mx-auto bg-green-100 rounded-full flex items-center justify-center mb-2">
-                  <CheckCircle className="w-8 h-8 text-green-600" />
-                </div>
-                <p className="text-2xl font-bold text-green-600">{sendResult.successCount}</p>
-                <p className="text-xs text-gray-500">发送成功</p>
-              </div>
-              <div className="text-center">
-                <div className="w-16 h-16 mx-auto bg-red-100 rounded-full flex items-center justify-center mb-2">
-                  <XCircle className="w-8 h-8 text-red-600" />
-                </div>
-                <p className="text-2xl font-bold text-red-600">{sendResult.failCount}</p>
-                <p className="text-xs text-gray-500">发送失败</p>
-              </div>
-            </div>
-
-            <div className="text-left">
-              <p className="text-sm font-medium text-gray-700 mb-3">发送明细：</p>
-              <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-xl">
-                {sendResult.results.map((result, idx) => (
-                  <div 
-                    key={idx} 
-                    className={`flex items-center justify-between px-4 py-2.5 border-b border-gray-100 last:border-0 ${
-                      result.success ? 'bg-white' : 'bg-red-50'
-                    }`}
-                  >
-                    <span className="text-sm text-gray-700">{result.customerName}</span>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      result.success 
-                        ? 'bg-green-100 text-green-700' 
-                        : 'bg-red-100 text-red-700'
-                    }`}>
-                      {result.success ? '✓ 已发送' : '✗ 失败'}
-                    </span>
+        {step !== 'result' && (
+          <div className="px-6 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-center gap-4">
+            {['选择', '确认', '结果'].map((label, idx) => {
+              const stepArr: Step[] = ['select', 'confirm', 'result'];
+              const s = stepArr[idx];
+              const num = idx + 1;
+              const isActive = step === s;
+              const currentIdx = stepArr.indexOf(step);
+              const isDone = idx < currentIdx;
+              return (
+                <div key={s} className="flex items-center gap-2">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-medium ${
+                    isActive
+                      ? 'bg-amber-500 text-white'
+                      : isDone
+                        ? 'bg-green-500 text-white'
+                        : 'bg-gray-200 text-gray-500'
+                  }`}>
+                    {isDone ? <CheckCircle className="w-4 h-4" /> : num}
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-8 flex justify-center gap-3">
-              <button
-                onClick={handleClose}
-                className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors"
-              >
-                关闭
-              </button>
-              <button
-                onClick={() => { setIsSent(false); setSendResult(null); }}
-                className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                继续发送
-              </button>
-            </div>
+                  <span className={`text-sm ${isActive ? 'font-medium text-gray-900' : 'text-gray-500'}`}>
+                    {label}
+                  </span>
+                  {idx < 2 && (
+                    <ChevronRight className="w-4 h-4 text-gray-300 ml-2" />
+                  )}
+                </div>
+              );
+            })}
           </div>
-        ) : (
+        )}
+
+        {step === 'select' && (
           <>
             <div className="p-6 space-y-5 overflow-y-auto flex-1">
               <div>
@@ -288,7 +245,7 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
                     {selectedCustomerIds.size === recoveryCustomers.length ? '取消全选' : '全选'}
                   </button>
                 </div>
-                <div className="border border-gray-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+                <div className="border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
                   {recoveryCustomers.length > 0 ? (
                     <div className="divide-y divide-gray-100">
                       {recoveryCustomers.map(customer => {
@@ -355,19 +312,211 @@ export default function BatchSendModal({ isOpen, onClose, preselectedCustomerIds
                   取消
                 </button>
                 <button
-                  onClick={handleSend}
+                  onClick={() => setStep('confirm')}
                   disabled={selectedCustomerIds.size === 0 || !selectedTemplateId}
                   className="px-5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-all flex items-center gap-2 shadow-sm"
                 >
-                  <Send className="w-4 h-4" />
-                  立即发送
+                  下一步
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
           </>
         )}
+
+        {step === 'confirm' && (
+          <div className="p-6 overflow-y-auto flex-1">
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5 mb-6">
+              <h3 className="font-semibold text-amber-900 mb-4 flex items-center gap-2">
+                <FileText className="w-5 h-5" />
+                发送确认摘要
+              </h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between bg-white/60 rounded-lg px-4 py-3">
+                  <span className="text-sm text-gray-600">发送方式</span>
+                  <span className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+                    {selectedChannel === 'wechat' ? <MessageCircle className="w-4 h-4 text-green-600" /> : <Mail className="w-4 h-4 text-blue-600" />}
+                    {channelName}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between bg-white/60 rounded-lg px-4 py-3">
+                  <span className="text-sm text-gray-600">使用模板</span>
+                  <span className="text-sm font-medium text-gray-900">{selectedTemplate?.name}</span>
+                </div>
+                <div className="flex items-center justify-between bg-white/60 rounded-lg px-4 py-3">
+                  <span className="text-sm text-gray-600">发送人数</span>
+                  <span className="text-lg font-bold text-amber-600">{selectedCustomers.length} 人</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-3">收件人列表：</h4>
+              <div className="border border-gray-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+                {selectedCustomers.length > 0 ? (
+                  <div className="divide-y divide-gray-100">
+                    {selectedCustomers.map(customer => {
+                      const days = getDaysAfterSurgery(customer.surgeryDate);
+                      return (
+                        <div key={customer.id} className="p-3 flex items-center gap-3 bg-white">
+                          <img src={customer.avatar} alt={customer.name} className="w-9 h-9 rounded-full" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900">{customer.name}</p>
+                            <p className="text-xs text-gray-500">
+                              {customer.projectType} · 术后第{days}天
+                            </p>
+                          </div>
+                          <CheckCircle className="w-5 h-5 text-green-500" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-6 text-center text-sm text-gray-500">暂无选中顾客</div>
+                )}
+              </div>
+            </div>
+
+            {selectedTemplate && (
+              <div className="mt-6">
+                <h4 className="text-sm font-medium text-gray-700 mb-3">消息预览：</h4>
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                  <p className="text-sm text-gray-700 leading-relaxed">
+                    {getPreviewContent(selectedCustomers[0] || customers[0])}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-3 text-right">—— 以上为示例内容，实际发送时会替换为对应顾客信息</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {step === 'confirm' && (
+          <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
+            <button
+              onClick={() => setStep('select')}
+              className="px-5 py-2 text-sm font-medium text-gray-600 hover:bg-white rounded-lg transition-colors border border-gray-300 flex items-center gap-1.5"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              上一步
+            </button>
+            <button
+              onClick={handleSend}
+              className="px-6 py-2 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white text-sm font-medium rounded-lg transition-all flex items-center gap-2 shadow-sm"
+            >
+              <Send className="w-4 h-4" />
+              确认发送
+            </button>
+          </div>
+        )}
+
+        {step === 'result' && sendResult && (
+          <div className="p-10 text-center overflow-y-auto flex-1">
+            <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-5 ${
+              sendResult.failCount === 0 
+                ? 'bg-green-100' 
+                : sendResult.successCount === 0 
+                  ? 'bg-red-100' 
+                  : 'bg-amber-100'
+            }`}>
+              {sendResult.failCount === 0 ? (
+                <Smile className="w-10 h-10 text-green-600" />
+              ) : sendResult.successCount === 0 ? (
+                <AlertCircle className="w-10 h-10 text-red-600" />
+              ) : (
+                <CheckCircle2 className="w-10 h-10 text-amber-600" />
+              )}
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">
+              {sendResult.failCount === 0 
+                ? '全部发送成功 🎉' 
+                : sendResult.successCount === 0 
+                  ? '发送失败' 
+                  : '部分发送成功'}
+            </h3>
+            <p className="text-sm text-gray-500 mb-6">
+              已尝试向 {sendResult.results.length} 位顾客发送{channelName}提醒
+            </p>
+
+            <div className="flex justify-center gap-12 mb-8">
+              <div className="text-center">
+                <div className="w-20 h-20 mx-auto bg-green-100 rounded-full flex items-center justify-center mb-2">
+                  <CheckCircle className="w-9 h-9 text-green-600" />
+                </div>
+                <p className="text-3xl font-bold text-green-600">{sendResult.successCount}</p>
+                <p className="text-sm text-gray-500 mt-1">发送成功</p>
+              </div>
+              <div className="text-center">
+                <div className="w-20 h-20 mx-auto bg-red-100 rounded-full flex items-center justify-center mb-2">
+                  <XCircle className="w-9 h-9 text-red-600" />
+                </div>
+                <p className="text-3xl font-bold text-red-600">{sendResult.failCount}</p>
+                <p className="text-sm text-gray-500 mt-1">发送失败</p>
+              </div>
+            </div>
+
+            {sendResult.successCount > 0 && (
+              <div className="text-left mb-5">
+                <p className="text-sm font-medium text-green-700 mb-2 flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4" />
+                  发送成功 ({sendResult.successCount}人)
+                </p>
+                <div className="max-h-32 overflow-y-auto border border-green-200 rounded-xl bg-green-50/50">
+                  {sendResult.results.filter(r => r.success).map((result, idx) => (
+                    <div 
+                      key={idx} 
+                      className="flex items-center justify-between px-4 py-2 border-b border-green-100 last:border-0"
+                    >
+                      <span className="text-sm text-gray-700">{result.customerName}</span>
+                      <span className="text-xs text-green-600 font-medium">✓ 已送达</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {sendResult.failCount > 0 && (
+              <div className="text-left">
+                <p className="text-sm font-medium text-red-700 mb-2 flex items-center gap-1.5">
+                  <XCircle className="w-4 h-4" />
+                  发送失败 ({sendResult.failCount}人)
+                </p>
+                <div className="max-h-32 overflow-y-auto border border-red-200 rounded-xl bg-red-50/50">
+                  {sendResult.results.filter(r => !r.success).map((result, idx) => (
+                    <div 
+                      key={idx} 
+                      className="flex items-center justify-between px-4 py-2 border-b border-red-100 last:border-0"
+                    >
+                      <div>
+                        <span className="text-sm text-gray-700">{result.customerName}</span>
+                        {result.error && (
+                          <p className="text-xs text-red-500">{result.error}</p>
+                        )}
+                      </div>
+                      <span className="text-xs text-red-600 font-medium">✗ 失败</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-8 flex justify-center gap-3">
+              <button
+                onClick={handleClose}
+                className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors"
+              >
+                关闭
+              </button>
+              <button
+                onClick={() => setStep('select')}
+                className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                继续发送
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-

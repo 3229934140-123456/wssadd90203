@@ -13,7 +13,9 @@ export type TimelineEventType =
   | 'exception_assigned' 
   | 'exception_resolved'
   | 'checkin'
-  | 'batch_sent';
+  | 'batch_sent'
+  | 'doctor_advice'
+  | 'handover_note';
 
 export interface TimelineEvent {
   id: string;
@@ -35,6 +37,34 @@ export interface BatchSendResponse {
   results: BatchSendResult[];
   successCount: number;
   failCount: number;
+}
+
+export interface HandoverTask {
+  id: string;
+  customerId: string;
+  customerName: string;
+  type: 'pending_followup' | 'high_risk' | 'callback' | 'other';
+  priority: 'high' | 'medium' | 'low';
+  content: string;
+  fromStaffId: string;
+  fromStaffName: string;
+  toStaffId?: string;
+  isCompleted: boolean;
+  createdAt: string;
+  note?: string;
+}
+
+export interface HandoverRecord {
+  id: string;
+  fromStaffId: string;
+  fromStaffName: string;
+  toStaffId?: string;
+  toStaffName?: string;
+  tasks: HandoverTask[];
+  note: string;
+  createdAt: string;
+  isAccepted: boolean;
+  acceptedAt?: string;
 }
 
 export interface Customer {

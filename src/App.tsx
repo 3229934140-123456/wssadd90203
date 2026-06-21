@@ -7,6 +7,7 @@ import Templates from "@/pages/Templates";
 import Exceptions from "@/pages/Exceptions";
 import Statistics from "@/pages/Statistics";
 import Staff from "@/pages/Staff";
+import Handover from "@/pages/Handover";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/customers/new" element={<NewCustomer />} />
           <Route path="/templates" element={<Templates />} />
           <Route path="/exceptions" element={<Exceptions />} />
+          <Route path="/handover" element={<Handover />} />
           <Route path="/statistics" element={<Statistics />} />
           <Route path="/staff" element={<Staff />} />
         </Route>

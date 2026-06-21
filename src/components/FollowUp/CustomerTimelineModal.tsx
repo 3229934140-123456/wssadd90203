@@ -9,7 +9,9 @@ import {
   CheckCircle2,
   Clock,
   Layers,
-  Calendar
+  Calendar,
+  Stethoscope,
+  Clipboard
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { formatDateTime } from '@/utils';
@@ -29,7 +31,9 @@ const eventConfig: Record<TimelineEventType, { color: string; bgColor: string; b
   exception_assigned: { color: 'text-orange-600', bgColor: 'bg-orange-100', borderColor: 'border-orange-200', icon: User },
   exception_resolved: { color: 'text-emerald-600', bgColor: 'bg-emerald-100', borderColor: 'border-emerald-200', icon: CheckCircle2 },
   checkin: { color: 'text-teal-600', bgColor: 'bg-teal-100', borderColor: 'border-teal-200', icon: CheckCircle2 },
-  batch_sent: { color: 'text-amber-600', bgColor: 'bg-amber-100', borderColor: 'border-amber-200', icon: Layers }
+  batch_sent: { color: 'text-amber-600', bgColor: 'bg-amber-100', borderColor: 'border-amber-200', icon: Layers },
+  doctor_advice: { color: 'text-indigo-600', bgColor: 'bg-indigo-100', borderColor: 'border-indigo-200', icon: Stethoscope },
+  handover_note: { color: 'text-slate-600', bgColor: 'bg-slate-100', borderColor: 'border-slate-200', icon: Clipboard }
 };
 
 export default function CustomerTimelineModal({ isOpen, onClose, customer }: CustomerTimelineModalProps) {

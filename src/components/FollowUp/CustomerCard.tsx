@@ -196,6 +196,16 @@ export default function CustomerCard({
           >
             <AlertCircle className="w-4 h-4" />
           </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewTimeline(customer);
+            }}
+            className="py-2 px-3 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 rounded-lg transition-colors"
+            title="查看随访时间线"
+          >
+            <History className="w-4 h-4" />
+          </button>
         </div>
       )}
 
