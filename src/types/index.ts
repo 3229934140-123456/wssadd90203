@@ -15,7 +15,22 @@ export type TimelineEventType =
   | 'checkin'
   | 'batch_sent'
   | 'doctor_advice'
-  | 'handover_note';
+  | 'handover_note'
+  | 'handover_action';
+
+export interface DoctorAdvice {
+  dietAdvice: string;
+  medicationAdvice: string;
+  reviewTime: string;
+  additionalAdvice?: string;
+}
+
+export interface HandoverAction {
+  type: 'phone_confirmed' | 'review_reminded' | 'reassigned_doctor' | 'followup_done' | 'other';
+  note: string;
+  operatorId: string;
+  operatorName: string;
+}
 
 export interface TimelineEvent {
   id: string;
@@ -24,6 +39,8 @@ export interface TimelineEvent {
   title: string;
   description: string;
   metadata?: Record<string, any>;
+  doctorAdvice?: DoctorAdvice;
+  handoverAction?: HandoverAction;
 }
 
 export interface BatchSendResult {
@@ -112,6 +129,28 @@ export interface ExceptionRecord {
   resolvedAt: string | null;
   resolution: string;
   reporterId?: string;
+  doctorAdvice?: DoctorAdvice;
+}
+
+export interface HandoverTask {
+  id: string;
+  customerId: string;
+  customerName: string;
+  type: 'pending_followup' | 'high_risk' | 'callback' | 'other';
+  priority: 'high' | 'medium' | 'low';
+  content: string;
+  fromStaffId: string;
+  fromStaffName: string;
+  toStaffId?: string;
+  toStaffName?: string;
+  isCompleted: boolean;
+  completedAt?: string;
+  completedBy?: string;
+  completedByName?: string;
+  processingNote?: string;
+  processingType?: string;
+  createdAt: string;
+  note?: string;
 }
 
 export interface Template {

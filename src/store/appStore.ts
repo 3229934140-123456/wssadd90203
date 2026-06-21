@@ -11,7 +11,9 @@ import type {
   BatchSendResponse,
   BatchSendResult,
   HandoverRecord,
-  HandoverTask
+  HandoverTask,
+  DoctorAdvice,
+  HandoverAction
 } from '@/types';
 import {
   mockCustomers,
@@ -45,7 +47,7 @@ interface AppState {
   
   addException: (exception: Omit<ExceptionRecord, 'id' | 'createdAt' | 'status'>) => void;
   assignException: (exceptionId: string, doctorId: string) => void;
-  resolveException: (exceptionId: string, resolution: string) => void;
+  resolveException: (exceptionId: string, resolution: string, doctorAdvice?: DoctorAdvice) => void;
   getAssignedExceptions: (doctorId?: string) => ExceptionRecord[];
   getOverdueHighRiskExceptions: () => ExceptionRecord[];
   
@@ -63,9 +65,12 @@ interface AppState {
   
   createHandover: (tasks: Omit<HandoverTask, 'id' | 'fromStaffId' | 'fromStaffName' | 'createdAt' | 'isCompleted'>[], note: string) => HandoverRecord;
   acceptHandover: (handoverId: string) => void;
-  completeHandoverTask: (taskId: string) => void;
+  canAcceptHandover: (handover: HandoverRecord) => boolean;
+  processHandoverTask: (taskId: string, actionType: string, note: string) => void;
+  completeHandoverTask: (taskId: string, actionType?: string, note?: string) => void;
   getPendingHandovers: () => HandoverRecord[];
   getTodayHandoverTasks: () => HandoverTask[];
+  getAcceptedActiveTasks: () => HandoverTask[];
 }
 
 export const useAppStore = create<AppState>()(
@@ -291,11 +296,12 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      resolveException: (exceptionId, resolution) => {
+      resolveException: (exceptionId, resolution, doctorAdvice) => {
+        const now = new Date().toISOString();
         set((state) => ({
           exceptions: state.exceptions.map(e =>
             e.id === exceptionId
-              ? { ...e, status: 'resolved', resolvedAt: new Date().toISOString(), resolution }
+              ? { ...e, status: 'resolved', resolvedAt: now, resolution, doctorAdvice }
               : e
           )
         }));
@@ -447,14 +453,26 @@ export const useAppStore = create<AppState>()(
               });
             }
             if (e.status === 'resolved' && e.resolvedAt) {
-              events.push({
-                id: `exception-advice-${e.id}`,
-                type: 'doctor_advice',
-                timestamp: e.resolvedAt,
-                title: `医生处理建议：${e.type}`,
-                description: e.resolution,
-                metadata: { doctor: e.assignedDoctor, exceptionType: e.type }
-              });
+              if (e.doctorAdvice) {
+                events.push({
+                  id: `exception-advice-${e.id}`,
+                  type: 'doctor_advice',
+                  timestamp: e.resolvedAt,
+                  title: `医生处置建议：${e.type}`,
+                  description: e.resolution || '医生已填写结构化处置建议',
+                  doctorAdvice: e.doctorAdvice,
+                  metadata: { doctor: e.assignedDoctor, exceptionType: e.type }
+                });
+              } else {
+                events.push({
+                  id: `exception-advice-${e.id}`,
+                  type: 'doctor_advice',
+                  timestamp: e.resolvedAt,
+                  title: `医生处理建议：${e.type}`,
+                  description: e.resolution,
+                  metadata: { doctor: e.assignedDoctor, exceptionType: e.type }
+                });
+              }
               events.push({
                 id: `exception-resolve-${e.id}`,
                 type: 'exception_resolved',
@@ -477,6 +495,50 @@ export const useAppStore = create<AppState>()(
               description: `术后第${f.dayNumber}天打卡确认`
             });
           });
+
+        // 5. 交接班处理动作事件
+        state.handoverRecords.forEach(h => {
+          h.tasks
+            .filter(t => t.customerId === customerId)
+            .forEach(t => {
+              if (t.processingNote || t.isCompleted) {
+                const actionTime = t.completedAt || t.createdAt;
+                const actionType = t.processingType || '处理';
+                events.push({
+                  id: `handover-action-${t.id}`,
+                  type: 'handover_action',
+                  timestamp: actionTime,
+                  title: `接班${actionType}`,
+                  description: t.processingNote || '接班处理',
+                  handoverAction: {
+                    type: (t.processingType as any) || 'other',
+                    note: t.processingNote || '',
+                    operatorId: t.toStaffId || h.fromStaffId,
+                    operatorName: t.toStaffName || h.fromStaffName
+                  },
+                  metadata: {
+                    handoverId: h.id,
+                    taskId: t.id,
+                    fromStaffName: h.fromStaffName
+                  }
+                });
+              }
+            });
+          if (h.note && h.tasks.some(t => t.customerId === customerId)) {
+            events.push({
+              id: `handover-note-${h.id}`,
+              type: 'handover_note',
+              timestamp: h.createdAt,
+              title: `交接班（${h.fromStaffName} → ${h.toStaffName || '待接交'}）`,
+              description: h.note,
+              metadata: {
+                fromStaffName: h.fromStaffName,
+                toStaffName: h.toStaffName,
+                isAccepted: h.isAccepted
+              }
+            });
+          }
+        });
 
         // 按时间排序，最新在前
         return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -528,40 +590,98 @@ export const useAppStore = create<AppState>()(
 
       acceptHandover: (handoverId) => {
         const currentUser = get().currentUser;
+        const handover = get().handoverRecords.find(h => h.id === handoverId);
+        if (!handover) return;
+        // 禁止接自己的交班
+        if (handover.fromStaffId === currentUser.id) return;
+        // 禁止非护士接交
+        if (currentUser.role !== 'nurse') return;
+
         const now = new Date().toISOString();
         set((state) => ({
           handoverRecords: state.handoverRecords.map(h => 
             h.id === handoverId 
-              ? { ...h, isAccepted: true, toStaffId: currentUser.id, toStaffName: currentUser.name, acceptedAt: now }
+              ? { 
+                  ...h, 
+                  isAccepted: true, 
+                  toStaffId: currentUser.id, 
+                  toStaffName: currentUser.name, 
+                  acceptedAt: now,
+                  tasks: h.tasks.map(t => ({
+                    ...t,
+                    toStaffId: currentUser.id,
+                    toStaffName: currentUser.name
+                  }))
+                }
               : h
           )
         }));
         
-        const handover = get().handoverRecords.find(h => h.id === handoverId);
-        if (handover) {
+        const updatedHandover = get().handoverRecords.find(h => h.id === handoverId);
+        if (updatedHandover) {
           get().addOperationLog({
             staffId: currentUser.id,
             staffName: currentUser.name,
             action: '接交接班',
-            target: handover.fromStaffName,
-            details: `接收了${handover.tasks.length}项交接班任务`
+            target: updatedHandover.fromStaffName,
+            details: `接收了${updatedHandover.tasks.length}项交接班任务`
           });
         }
       },
 
-      completeHandoverTask: (taskId) => {
+      canAcceptHandover: (handover) => {
+        const currentUser = get().currentUser;
+        return handover.fromStaffId !== currentUser.id && currentUser.role === 'nurse' && !handover.isAccepted;
+      },
+
+      processHandoverTask: (taskId, actionType, note) => {
+        const currentUser = get().currentUser;
         set((state) => ({
           handoverRecords: state.handoverRecords.map(h => ({
             ...h,
             tasks: h.tasks.map(t => 
-              t.id === taskId ? { ...t, isCompleted: true } : t
+              t.id === taskId ? { 
+                ...t, 
+                processingNote: note, 
+                processingType: actionType
+              } : t
+            )
+          }))
+        }));
+        get().addOperationLog({
+          staffId: currentUser.id,
+          staffName: currentUser.name,
+          action: '记录接班处理',
+          target: '',
+          details: `交接班处理（${actionType}）：${note}`
+        });
+      },
+
+      completeHandoverTask: (taskId, actionType, note) => {
+        const currentUser = get().currentUser;
+        const now = new Date().toISOString();
+        set((state) => ({
+          handoverRecords: state.handoverRecords.map(h => ({
+            ...h,
+            tasks: h.tasks.map(t => 
+              t.id === taskId ? { 
+                ...t, 
+                isCompleted: true,
+                completedAt: now,
+                completedBy: currentUser.id,
+                completedByName: currentUser.name,
+                ...(actionType ? { processingType: actionType } : {}),
+                ...(note ? { processingNote: note } : {})
+              } : t
             )
           }))
         }));
       },
 
       getPendingHandovers: () => {
-        return get().handoverRecords.filter(h => !h.isAccepted);
+        const currentUserId = get().currentUser.id;
+        // 过滤掉自己创建的交班（不能接自己的）
+        return get().handoverRecords.filter(h => !h.isAccepted && h.fromStaffId !== currentUserId);
       },
 
       getTodayHandoverTasks: () => {
@@ -578,6 +698,23 @@ export const useAppStore = create<AppState>()(
           const priorityOrder = { high: 0, medium: 1, low: 2 };
           return priorityOrder[a.priority] - priorityOrder[b.priority];
         });
+      },
+
+      getAcceptedActiveTasks: () => {
+        const currentUser = get().currentUser;
+        const state = get();
+        const tasks: HandoverTask[] = [];
+        state.handoverRecords
+          .filter(h => h.isAccepted && h.toStaffId === currentUser.id)
+          .forEach(h => {
+            h.tasks
+              .filter(t => !t.isCompleted)
+              .forEach(t => tasks.push(t));
+          });
+        return tasks.sort((a, b) => {
+          const priorityOrder = { high: 0, medium: 1, low: 2 };
+          return priorityOrder[a.priority] - priorityOrder[b.priority];
+        });
       }
     }),
     {
@@ -587,7 +724,9 @@ export const useAppStore = create<AppState>()(
         followUps: state.followUps,
         exceptions: state.exceptions,
         templates: state.templates,
-        operationLogs: state.operationLogs
+        operationLogs: state.operationLogs,
+        handoverRecords: state.handoverRecords,
+        currentUser: state.currentUser
       })
     }
   )

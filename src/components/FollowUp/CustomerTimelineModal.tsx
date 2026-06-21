@@ -11,7 +11,13 @@ import {
   Layers,
   Calendar,
   Stethoscope,
-  Clipboard
+  Clipboard,
+  Utensils,
+  Pill,
+  CalendarDays,
+  StickyNote,
+  RefreshCcw,
+  ArrowLeftRight
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { formatDateTime } from '@/utils';
@@ -33,7 +39,16 @@ const eventConfig: Record<TimelineEventType, { color: string; bgColor: string; b
   checkin: { color: 'text-teal-600', bgColor: 'bg-teal-100', borderColor: 'border-teal-200', icon: CheckCircle2 },
   batch_sent: { color: 'text-amber-600', bgColor: 'bg-amber-100', borderColor: 'border-amber-200', icon: Layers },
   doctor_advice: { color: 'text-indigo-600', bgColor: 'bg-indigo-100', borderColor: 'border-indigo-200', icon: Stethoscope },
-  handover_note: { color: 'text-slate-600', bgColor: 'bg-slate-100', borderColor: 'border-slate-200', icon: Clipboard }
+  handover_note: { color: 'text-slate-600', bgColor: 'bg-slate-100', borderColor: 'border-slate-200', icon: Clipboard },
+  handover_action: { color: 'text-violet-600', bgColor: 'bg-violet-100', borderColor: 'border-violet-200', icon: ArrowLeftRight }
+};
+
+const processTypeLabels: Record<string, string> = {
+  phone_confirmed: '电话确认',
+  review_reminded: '提醒复查',
+  reassigned_doctor: '再次转医生',
+  followup_done: '完成随访',
+  other: '其他处理'
 };
 
 export default function CustomerTimelineModal({ isOpen, onClose, customer }: CustomerTimelineModalProps) {
@@ -103,15 +118,103 @@ export default function CustomerTimelineModal({ isOpen, onClose, customer }: Cus
                           
                           {isSelected && event.type === 'phone_call' && event.metadata?.content && (
                             <div className="mt-3 p-3 bg-purple-50 rounded-lg border border-purple-100">
-                              <p className="text-xs font-medium text-purple-700 mb-1">📞 通话详情</p>
+                              <p className="text-xs font-medium text-purple-700 mb-1 flex items-center gap-1">
+                                <Phone className="w-3 h-3" /> 通话详情
+                              </p>
                               <p className="text-sm text-gray-700 whitespace-pre-wrap">{event.metadata.content}</p>
                             </div>
                           )}
                           
                           {isSelected && event.type === 'batch_sent' && event.metadata?.templateName && (
                             <div className="mt-3 p-3 bg-amber-50 rounded-lg border border-amber-100">
-                              <p className="text-xs font-medium text-amber-700 mb-1">🎁 发送模板</p>
+                              <p className="text-xs font-medium text-amber-700 mb-1 flex items-center gap-1">
+                                <Layers className="w-3 h-3" /> 发送模板
+                              </p>
                               <p className="text-sm text-gray-700">{event.metadata.templateName}</p>
+                              {event.metadata?.channel && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  渠道：{event.metadata.channel === 'sms' ? '短信' : event.metadata.channel === 'wechat' ? '微信' : '电话'}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {isSelected && event.type === 'doctor_advice' && event.doctorAdvice && (
+                            <div className="mt-3 space-y-2">
+                              <p className="text-xs font-semibold text-indigo-700 flex items-center gap-1">
+                                <Stethoscope className="w-3 h-3" /> 医生后续安排
+                              </p>
+                              {event.doctorAdvice.dietAdvice && (
+                                <div className="p-2.5 bg-green-50 rounded-lg border border-green-100">
+                                  <p className="text-xs font-medium text-green-700 mb-0.5 flex items-center gap-1">
+                                    <Utensils className="w-3 h-3" /> 饮食建议
+                                  </p>
+                                  <p className="text-sm text-gray-700">{event.doctorAdvice.dietAdvice}</p>
+                                </div>
+                              )}
+                              {event.doctorAdvice.medicationAdvice && (
+                                <div className="p-2.5 bg-blue-50 rounded-lg border border-blue-100">
+                                  <p className="text-xs font-medium text-blue-700 mb-0.5 flex items-center gap-1">
+                                    <Pill className="w-3 h-3" /> 用药建议
+                                  </p>
+                                  <p className="text-sm text-gray-700">{event.doctorAdvice.medicationAdvice}</p>
+                                </div>
+                              )}
+                              {event.doctorAdvice.reviewTime && (
+                                <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-100">
+                                  <p className="text-xs font-medium text-amber-700 mb-0.5 flex items-center gap-1">
+                                    <CalendarDays className="w-3 h-3" /> 复查时间
+                                  </p>
+                                  <p className="text-sm text-gray-700 font-medium">{event.doctorAdvice.reviewTime}</p>
+                                </div>
+                              )}
+                              {event.doctorAdvice.additionalAdvice && (
+                                <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200">
+                                  <p className="text-xs font-medium text-gray-700 mb-0.5 flex items-center gap-1">
+                                    <StickyNote className="w-3 h-3" /> 其他说明
+                                  </p>
+                                  <p className="text-sm text-gray-700">{event.doctorAdvice.additionalAdvice}</p>
+                                </div>
+                              )}
+                              {event.metadata?.doctor && (
+                                <p className="text-xs text-gray-400 pt-1 flex items-center gap-1">
+                                  <User className="w-3 h-3" />
+                                  处置医生：{event.metadata.doctor}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {isSelected && event.type === 'handover_action' && event.handoverAction && (
+                            <div className="mt-3 p-3 bg-violet-50 rounded-lg border border-violet-100">
+                              <p className="text-xs font-medium text-violet-700 mb-1 flex items-center gap-1">
+                                <RefreshCcw className="w-3 h-3" /> 
+                                接班处理：{processTypeLabels[event.handoverAction.type] || event.handoverAction.type}
+                              </p>
+                              {event.handoverAction.note && (
+                                <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                                  {event.handoverAction.note}
+                                </p>
+                              )}
+                              <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+                                <User className="w-3 h-3" />
+                                处理人：{event.handoverAction.operatorName}
+                                {event.metadata?.fromStaffName && (
+                                  <span className="ml-2">交班来自：{event.metadata.fromStaffName}</span>
+                                )}
+                              </p>
+                            </div>
+                          )}
+
+                          {isSelected && event.type === 'handover_note' && event.metadata && (
+                            <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                              <p className="text-xs font-medium text-slate-700 mb-1 flex items-center gap-1">
+                                <Clipboard className="w-3 h-3" /> 交接班备注
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                交班人：{event.metadata.fromStaffName}
+                                {event.metadata.toStaffName ? ` → 接交人：${event.metadata.toStaffName}` : '（待接交）'}
+                              </p>
                             </div>
                           )}
                         </div>

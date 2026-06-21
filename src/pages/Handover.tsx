@@ -12,15 +12,30 @@ import {
   CheckCheck,
   History,
   User,
-  ArrowLeftRight
+  ArrowLeftRight,
+  MessageSquare,
+  RefreshCcw,
+  Stethoscope,
+  X,
+  ChevronRight,
+  Sparkles
 } from 'lucide-react';
 import PageHeader from '@/components/Layout/PageHeader';
 import CustomerTimelineModal from '@/components/FollowUp/CustomerTimelineModal';
 import { useAppStore } from '@/store/appStore';
 import { formatDateTime, getDaysAfterSurgery } from '@/utils';
-import type { HandoverTask, Customer } from '@/types';
+import type { HandoverTask, Customer, FollowUpRecord, ExceptionRecord } from '@/types';
 
-type TabType = 'current' | 'create' | 'history';
+type TabType = 'overview' | 'current' | 'create' | 'history';
+
+interface ProcessTaskModalState {
+  isOpen: boolean;
+  task: HandoverTask | null;
+  customer: Customer | null;
+  actionType: string;
+  note: string;
+  andMarkComplete: boolean;
+}
 
 export default function Handover() {
   const {
@@ -32,14 +47,27 @@ export default function Handover() {
     createHandover,
     acceptHandover,
     completeHandoverTask,
-    getPendingHandovers
+    processHandoverTask,
+    getPendingHandovers,
+    canAcceptHandover,
+    getOverdueHighRiskExceptions
   } = useAppStore();
 
-  const [activeTab, setActiveTab] = useState<TabType>('current');
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [handoverNote, setHandoverNote] = useState('');
   const [selectedTasks, setSelectedTasks] = useState<Map<string, Omit<HandoverTask, 'id' | 'fromStaffId' | 'fromStaffName' | 'createdAt' | 'isCompleted'>>>(new Map());
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showTimeline, setShowTimeline] = useState(false);
+
+  // 接班处理弹窗
+  const [processModal, setProcessModal] = useState<ProcessTaskModalState>({
+    isOpen: false,
+    task: null,
+    customer: null,
+    actionType: 'phone_confirmed',
+    note: '',
+    andMarkComplete: true
+  });
 
   // 今天未完成的随访
   const pendingFollowUps = useMemo(() => {
@@ -114,6 +142,68 @@ export default function Handover() {
     completeHandoverTask(taskId);
   };
 
+  const openProcessTask = (task: HandoverTask, customer: Customer) => {
+    setProcessModal({
+      isOpen: true,
+      task,
+      customer,
+      actionType: 'phone_confirmed',
+      note: '',
+      andMarkComplete: true
+    });
+  };
+
+  const closeProcessTask = () => {
+    setProcessModal({
+      isOpen: false,
+      task: null,
+      customer: null,
+      actionType: 'phone_confirmed',
+      note: '',
+      andMarkComplete: true
+    });
+  };
+
+  const submitProcessTask = () => {
+    if (!processModal.task) return;
+    if (!processModal.note.trim()) return;
+    if (processModal.andMarkComplete) {
+      completeHandoverTask(processModal.task.id, processModal.actionType, processModal.note);
+    } else {
+      processHandoverTask(processModal.task.id, processModal.actionType, processModal.note);
+    }
+    closeProcessTask();
+  };
+
+  // 概览统计
+  const overviewStats = useMemo(() => {
+    const highRiskUnresolved = exceptions.filter(e => e.level === 'high' && e.status !== 'resolved');
+    const todayPending = followUps.filter(f => {
+      const customer = customers.find(c => c.id === f.customerId);
+      if (!customer) return false;
+      const days = getDaysAfterSurgery(customer.surgeryDate);
+      return (days === 1 || days === 3 || days === 7) && f.status === 'pending';
+    });
+    const callbackTasks = [...handoverRecords]
+      .flatMap(h => h.tasks)
+      .filter(t => t.type === 'callback' && !t.isCompleted);
+    const overdue = getOverdueHighRiskExceptions();
+    return {
+      highRiskUnresolved,
+      todayPending,
+      callbackTasks,
+      overdue
+    };
+  }, [exceptions, followUps, customers, handoverRecords, getOverdueHighRiskExceptions]);
+
+  const processTypeOptions = [
+    { id: 'phone_confirmed', label: '已电话确认', icon: Phone, color: 'bg-blue-100 text-blue-700' },
+    { id: 'review_reminded', label: '已提醒复查', icon: CheckCheck, color: 'bg-green-100 text-green-700' },
+    { id: 'reassigned_doctor', label: '已再次转医生', icon: Stethoscope, color: 'bg-purple-100 text-purple-700' },
+    { id: 'followup_done', label: '随访已完成', icon: MessageSquare, color: 'bg-amber-100 text-amber-700' },
+    { id: 'other', label: '其他处理', icon: RefreshCcw, color: 'bg-gray-100 text-gray-700' }
+  ];
+
   const openTimeline = (customer: Customer) => {
     setSelectedCustomer(customer);
     setShowTimeline(true);
@@ -175,6 +265,7 @@ export default function Handover() {
         <div className="bg-white rounded-xl border border-gray-200 mb-6">
           <div className="flex border-b border-gray-200">
             {[
+              { id: 'overview', label: '接班概览', icon: Sparkles, badge: overviewStats.highRiskUnresolved.length + overviewStats.todayPending.length + overviewStats.callbackTasks.length },
               { id: 'current', label: '待办清单', icon: FileText, badge: myActiveTasks.length + pendingHandovers.length },
               { id: 'create', label: '创建交接', icon: Plus, badge: selectedTasks.size },
               { id: 'history', label: '历史记录', icon: History, badge: 0 }
@@ -182,7 +273,7 @@ export default function Handover() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as TabType)}
-                className={`flex-1 px-6 py-4 text-sm font-medium transition-colors flex items-center justify-center gap-2 relative ${
+                className={`flex-1 px-4 py-4 text-sm font-medium transition-colors flex items-center justify-center gap-2 relative ${
                   activeTab === tab.id
                     ? 'text-blue-600 border-b-2 border-blue-600 -mb-px bg-blue-50/30'
                     : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
@@ -191,7 +282,11 @@ export default function Handover() {
                 <tab.icon className="w-4 h-4" />
                 {tab.label}
                 {tab.badge > 0 && (
-                  <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 font-bold">
+                  <span className={`px-2 py-0.5 text-xs rounded-full font-bold ${
+                    tab.id === 'overview' && overviewStats.overdue.length > 0
+                      ? 'bg-red-100 text-red-700 animate-pulse'
+                      : 'bg-blue-100 text-blue-700'
+                  }`}>
                     {tab.badge}
                   </span>
                 )}
@@ -199,6 +294,230 @@ export default function Handover() {
             ))}
           </div>
         </div>
+
+        {/* =============== 概览Tab =============== */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            {overviewStats.overdue.length > 0 && (
+              <div className="bg-red-50 border-2 border-red-300 rounded-xl p-5 animate-pulse">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-12 h-12 rounded-full bg-red-500 flex items-center justify-center">
+                    <AlertTriangle className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold text-red-700">
+                      ⚠️ 有 {overviewStats.overdue.length} 条高风险异常超时未处理
+                    </p>
+                    <p className="text-sm text-red-600">高风险异常超过30分钟未处理，请优先跟进</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {overviewStats.overdue.map(exc => {
+                    const c = customers.find(cu => cu.id === exc.customerId);
+                    return (
+                      <div key={exc.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-red-200">
+                        <div className="flex items-center gap-3">
+                          {c && <img src={c.avatar} alt={c.name} className="w-9 h-9 rounded-full" />}
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{c?.name} — {exc.type}</p>
+                            <p className="text-xs text-red-600">已等待超过30分钟</p>
+                          </div>
+                        </div>
+                        <span className="px-2 py-0.5 text-xs bg-red-500 text-white rounded-full font-bold">超时</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-5">
+              {/* 高风险未处理 */}
+              <div className="bg-white rounded-xl border border-red-200 overflow-hidden hover:shadow-md transition-shadow">
+                <div className="p-5 border-b border-red-100">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                      <AlertTriangle className="w-6 h-6 text-red-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">高风险未处理</p>
+                      <p className="text-3xl font-bold text-red-600">{overviewStats.highRiskUnresolved.length}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {overviewStats.highRiskUnresolved.length > 0 ? (
+                    overviewStats.highRiskUnresolved.map(exc => {
+                      const c = customers.find(cu => cu.id === exc.customerId);
+                      const overdue = getOverdueHighRiskExceptions().some(o => o.id === exc.id);
+                      return (
+                        <div key={exc.id} className={`p-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 flex items-center justify-between gap-2 ${overdue ? 'bg-red-50' : ''}`}>
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            {c && <img src={c.avatar} alt={c.name} className="w-8 h-8 rounded-full flex-shrink-0" />}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-gray-900 truncate">{c?.name || '未知顾客'}</p>
+                              <p className="text-xs text-gray-500 truncate">{exc.type}</p>
+                            </div>
+                          </div>
+                          {overdue && <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded flex-shrink-0">超时</span>}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="py-8 text-center text-sm text-gray-400">🎉 暂无高风险</div>
+                  )}
+                </div>
+                {overviewStats.highRiskUnresolved.length > 0 && (
+                  <div className="p-3 border-t border-gray-100">
+                    <button
+                      onClick={() => window.location.href = '/exceptions'}
+                      className="w-full text-xs text-red-600 hover:text-red-700 font-medium flex items-center justify-center gap-1"
+                    >
+                      全部查看并处理
+                      <ChevronRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* 今日未发提醒 */}
+              <div className="bg-white rounded-xl border border-blue-200 overflow-hidden hover:shadow-md transition-shadow">
+                <div className="p-5 border-b border-blue-100">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                      <MessageSquare className="w-6 h-6 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">今日未发提醒</p>
+                      <p className="text-3xl font-bold text-blue-600">{overviewStats.todayPending.length}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {overviewStats.todayPending.length > 0 ? (
+                    overviewStats.todayPending.map(fu => {
+                      const c = customers.find(cu => cu.id === fu.customerId);
+                      const days = c ? getDaysAfterSurgery(c.surgeryDate) : 0;
+                      return (
+                        <div key={fu.id} className="p-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50">
+                          <div className="flex items-center gap-2 mb-1">
+                            {c && <img src={c.avatar} alt={c.name} className="w-8 h-8 rounded-full" />}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">{c?.name}</p>
+                              <p className="text-xs text-gray-500 truncate">{c?.projectType}</p>
+                            </div>
+                          </div>
+                          <div className="pl-10">
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              days === 1 ? 'bg-green-100 text-green-700'
+                                : days === 3 ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-pink-100 text-pink-700'
+                            }`}>
+                              术后第{days}天
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="py-8 text-center text-sm text-gray-400">🎉 今日提醒已全部发送</div>
+                  )}
+                </div>
+                {overviewStats.todayPending.length > 0 && (
+                  <div className="p-3 border-t border-gray-100">
+                    <button
+                      onClick={() => window.location.href = '/dashboard'}
+                      className="w-full text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center justify-center gap-1"
+                    >
+                      去随访看板处理
+                      <ChevronRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* 电话复查待办 */}
+              <div className="bg-white rounded-xl border border-purple-200 overflow-hidden hover:shadow-md transition-shadow">
+                <div className="p-5 border-b border-purple-100">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
+                      <Phone className="w-6 h-6 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">电话复查待办</p>
+                      <p className="text-3xl font-bold text-purple-600">{overviewStats.callbackTasks.length}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {overviewStats.callbackTasks.length > 0 ? (
+                    overviewStats.callbackTasks.map(task => {
+                      const c = customers.find(cu => cu.id === task.customerId);
+                      return (
+                        <div key={task.id} className="p-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50">
+                          <div className="flex items-center gap-2 mb-1">
+                            {c && <img src={c.avatar} alt={c.name} className="w-8 h-8 rounded-full" />}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">{c?.name || task.customerName}</p>
+                              <p className="text-xs text-gray-500 truncate">{task.content}</p>
+                            </div>
+                          </div>
+                          <div className="pl-10 flex items-center gap-2">
+                            <span className="text-xs text-gray-400">来自 {task.fromStaffName}</span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="py-8 text-center text-sm text-gray-400">🎉 暂无复查待办</div>
+                  )}
+                </div>
+                {overviewStats.callbackTasks.length > 0 && (
+                  <div className="p-3 border-t border-gray-100">
+                    <button
+                      onClick={() => setActiveTab('current')}
+                      className="w-full text-xs text-purple-600 hover:text-purple-700 font-medium flex items-center justify-center gap-1"
+                    >
+                      去待办清单处理
+                      <ChevronRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 待接交的交班也显示在概览下面提示 */}
+            {pendingHandovers.length > 0 && (
+              <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-5">
+                <h3 className="font-semibold text-amber-900 mb-3 flex items-center gap-2">
+                  <ArrowLeftRight className="w-5 h-5" />
+                  有 {pendingHandovers.length} 份交班等待您接交
+                </h3>
+                <div className="flex gap-3 flex-wrap">
+                  {pendingHandovers.map(h => (
+                    <div key={h.id} className="bg-white rounded-lg border border-amber-200 p-3 min-w-[220px]">
+                      <div className="flex items-center gap-2 mb-2">
+                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${h.fromStaffId}`} alt={h.fromStaffName} className="w-7 h-7 rounded-full" />
+                        <div>
+                          <p className="text-sm font-medium">{h.fromStaffName}</p>
+                          <p className="text-xs text-gray-500">{formatDateTime(h.createdAt)}</p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-600">{h.tasks.length} 项待办</p>
+                      <button
+                        onClick={() => { handleAcceptHandover(h.id); }}
+                        disabled={!canAcceptHandover(h)}
+                        className="mt-2 w-full py-1.5 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-medium rounded"
+                      >
+                        一键接交
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {activeTab === 'current' && (
           <div className="space-y-6">
@@ -221,10 +540,19 @@ export default function Handover() {
                         </div>
                         <button
                           onClick={() => handleAcceptHandover(handover.id)}
-                          className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+                          disabled={!canAcceptHandover(handover)}
+                          className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+                            canAcceptHandover(handover)
+                              ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          }`}
                         >
                           <CheckCheck className="w-4 h-4" />
-                          接交
+                          {handover.fromStaffId === currentUser.id
+                            ? '不能接自己的'
+                            : currentUser.role !== 'nurse'
+                              ? '仅护士可接'
+                              : '接交'}
                         </button>
                       </div>
                       <div className="flex gap-2 flex-wrap">
@@ -276,21 +604,47 @@ export default function Handover() {
                               <div key={task.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg group hover:bg-gray-100 transition-colors">
                                 <button
                                   onClick={() => handleCompleteTask(task.id)}
-                                  className="mt-0.5 text-gray-400 hover:text-green-600 transition-colors"
-                                  title="标记完成"
+                                  className="mt-0.5 text-gray-400 hover:text-green-600 transition-colors flex-shrink-0"
+                                  title="直接标记完成"
                                 >
                                   <Circle className="w-5 h-5" />
                                 </button>
                                 <div className={`w-1.5 h-full rounded-full ${priorityColors[task.priority]} flex-shrink-0`} />
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-1">
+                                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                                     <span className={`px-2 py-0.5 text-xs rounded ${typeInfo.color}`}>
                                       <TypeIcon className="w-3 h-3 inline mr-1" />
                                       {typeInfo.label}
                                     </span>
                                     <span className="text-xs text-gray-400">{task.fromStaffName} 交接</span>
                                   </div>
-                                  <p className="text-sm text-gray-700">{task.content}</p>
+                                  <p className="text-sm text-gray-700 mb-2">{task.content}</p>
+                                  {task.processingNote && (
+                                    <div className="p-2 bg-violet-50 rounded border border-violet-100 mb-2">
+                                      <p className="text-xs text-violet-700 mb-0.5">📝 已记录处理：
+                                        <span className="font-medium ml-1">
+                                          {processTypeOptions.find(o => o.id === task.processingType)?.label || '处理中'}
+                                        </span>
+                                      </p>
+                                      <p className="text-xs text-gray-600">{task.processingNote}</p>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => openProcessTask(task, customer)}
+                                      className="text-xs px-2.5 py-1 bg-white border border-gray-300 rounded hover:border-violet-400 hover:text-violet-600 transition-colors flex items-center gap-1"
+                                    >
+                                      <RefreshCcw className="w-3 h-3" />
+                                      记录处理并完成
+                                    </button>
+                                    <button
+                                      onClick={() => openTimeline(customer)}
+                                      className="text-xs px-2.5 py-1 bg-white border border-gray-300 rounded hover:border-blue-400 hover:text-blue-600 transition-colors flex items-center gap-1"
+                                    >
+                                      <History className="w-3 h-3" />
+                                      看时间线
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -602,6 +956,111 @@ export default function Handover() {
           onClose={() => { setShowTimeline(false); setSelectedCustomer(null); }}
           customer={selectedCustomer}
         />
+      )}
+
+      {/* 接班处理弹窗 */}
+      {processModal.isOpen && processModal.task && processModal.customer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeProcessTask} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-violet-50 to-indigo-50">
+              <div className="flex items-center gap-3">
+                <img src={processModal.customer.avatar} alt={processModal.customer.name} className="w-10 h-10 rounded-full" />
+                <div>
+                  <h3 className="font-semibold text-gray-900">{processModal.customer.name} · 接班处理</h3>
+                  <p className="text-xs text-gray-500">{processModal.customer.projectType} · 术后第{getDaysAfterSurgery(processModal.customer.surgeryDate)}天</p>
+                </div>
+              </div>
+              <button
+                onClick={closeProcessTask}
+                className="p-2 hover:bg-white/60 rounded-lg transition-colors text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* 原始任务内容 */}
+              <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <p className="text-xs text-gray-500 mb-1">交接任务来自 {processModal.task.fromStaffName}：</p>
+                <p className="text-sm text-gray-800">{processModal.task.content}</p>
+              </div>
+
+              {/* 处理类型选择 */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">处理方式</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {processTypeOptions.map(opt => {
+                    const OptIcon = opt.icon;
+                    const selected = processModal.actionType === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => setProcessModal({ ...processModal, actionType: opt.id })}
+                        className={`p-2.5 rounded-lg border-2 text-left transition-all flex items-center gap-2 ${
+                          selected
+                            ? 'border-violet-500 bg-violet-50 shadow-sm'
+                            : 'border-gray-200 hover:border-gray-300 bg-white'
+                        }`}
+                      >
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${selected ? opt.color : 'bg-gray-100 text-gray-500'}`}>
+                          <OptIcon className="w-3.5 h-3.5" />
+                        </div>
+                        <span className={`text-xs font-medium ${selected ? 'text-violet-700' : 'text-gray-700'}`}>
+                          {opt.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 处理说明 */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">处理说明（必填）</label>
+                <textarea
+                  value={processModal.note}
+                  onChange={(e) => setProcessModal({ ...processModal, note: e.target.value })}
+                  placeholder="请详细描述处理情况、顾客反馈、后续安排等..."
+                  rows={4}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none"
+                />
+              </div>
+
+              {/* 同时标记完成 */}
+              <div className="flex items-center gap-2 p-3 bg-violet-50 rounded-lg border border-violet-100">
+                <input
+                  type="checkbox"
+                  id="markComplete"
+                  checked={processModal.andMarkComplete}
+                  onChange={(e) => setProcessModal({ ...processModal, andMarkComplete: e.target.checked })}
+                  className="w-4 h-4 text-violet-600 rounded border-gray-300 focus:ring-violet-500"
+                />
+                <label htmlFor="markComplete" className="text-sm text-gray-700 cursor-pointer flex-1">
+                  提交后同时将此任务标记为<span className="font-semibold text-violet-700">已完成</span>
+                </label>
+              </div>
+
+              {/* 提交按钮 */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={closeProcessTask}
+                  className="flex-1 py-2.5 border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm font-medium rounded-lg transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={submitProcessTask}
+                  disabled={!processModal.note.trim()}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-all shadow-sm flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  {processModal.andMarkComplete ? '提交并完成任务' : '仅保存处理记录'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

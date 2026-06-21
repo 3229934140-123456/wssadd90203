@@ -14,12 +14,16 @@ import {
   BellRing,
   ChevronDown,
   ChevronUp,
-  FolderClock
+  FolderClock,
+  Utensils,
+  Pill,
+  CalendarDays,
+  StickyNote
 } from 'lucide-react';
 import PageHeader from '@/components/Layout/PageHeader';
 import { useAppStore } from '@/store/appStore';
 import { formatDateTime, getDaysAfterSurgery } from '@/utils';
-import type { RiskLevel, ExceptionStatus, Customer } from '@/types';
+import type { RiskLevel, ExceptionStatus, Customer, DoctorAdvice } from '@/types';
 import CustomerTimelineModal from '@/components/FollowUp/CustomerTimelineModal';
 
 type ViewMode = 'all' | 'mine';
@@ -45,6 +49,28 @@ export default function Exceptions() {
   const [showTimeline, setShowTimeline] = useState(false);
   const [timelineCustomer, setTimelineCustomer] = useState<Customer | null>(null);
   const [overdueCount, setOverdueCount] = useState(0);
+
+  // 医生建议结构化表单状态
+  const [dietAdvice, setDietAdvice] = useState('');
+  const [medicationAdvice, setMedicationAdvice] = useState('');
+  const [reviewTime, setReviewTime] = useState('');
+  const [additionalAdvice, setAdditionalAdvice] = useState('');
+
+  // 如果是医生身份，默认显示我的任务
+  useEffect(() => {
+    if (currentUser.role === 'doctor') {
+      setViewMode('mine');
+    }
+  }, [currentUser.role, currentUser.id]);
+
+  // 切换选中的异常时，重置表单
+  useEffect(() => {
+    setResolution('');
+    setDietAdvice('');
+    setMedicationAdvice('');
+    setReviewTime('');
+    setAdditionalAdvice('');
+  }, [selectedException]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -103,10 +129,21 @@ export default function Exceptions() {
   };
 
   const handleResolve = (exceptionId: string) => {
-    if (resolution.trim()) {
-      resolveException(exceptionId, resolution);
+    if (resolution.trim() || dietAdvice.trim() || medicationAdvice.trim() || reviewTime.trim()) {
+      const hasStructured = dietAdvice.trim() || medicationAdvice.trim() || reviewTime.trim() || additionalAdvice.trim();
+      const advice: DoctorAdvice = {
+        dietAdvice: dietAdvice.trim(),
+        medicationAdvice: medicationAdvice.trim(),
+        reviewTime: reviewTime.trim(),
+        additionalAdvice: additionalAdvice.trim()
+      };
+      resolveException(exceptionId, resolution, hasStructured ? advice : undefined);
       setSelectedException(null);
       setResolution('');
+      setDietAdvice('');
+      setMedicationAdvice('');
+      setReviewTime('');
+      setAdditionalAdvice('');
     }
   };
 
@@ -421,34 +458,160 @@ export default function Exceptions() {
 
                 {selectedExceptionData.status === 'processing' && (
                   <div className="mt-4 pt-4 border-t border-gray-100">
-                    <p className="text-sm font-medium text-gray-700 mb-2">处理结果</p>
-                    <textarea
-                      value={resolution}
-                      onChange={(e) => setResolution(e.target.value)}
-                      placeholder="请输入处理意见和建议..."
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                    />
+                    <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                      <Stethoscope className="w-4 h-4 text-purple-600" />
+                      医生处置建议
+                    </p>
+
+                    <div className="space-y-3 mb-4">
+                      <div>
+                        <label className="text-xs text-gray-500 mb-1 block flex items-center gap-1">
+                          <Utensils className="w-3 h-3" /> 饮食建议
+                        </label>
+                        <textarea
+                          value={dietAdvice}
+                          onChange={(e) => setDietAdvice(e.target.value)}
+                          placeholder="如：继续流质饮食7天，避免辛辣、海鲜等发物，多吃高蛋白..."
+                          rows={2}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-gray-500 mb-1 block flex items-center gap-1">
+                          <Pill className="w-3 h-3" /> 用药建议
+                        </label>
+                        <textarea
+                          value={medicationAdvice}
+                          onChange={(e) => setMedicationAdvice(e.target.value)}
+                          placeholder="如：口服头孢3天，早晚各1粒，外用莫匹罗星软膏..."
+                          rows={2}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-gray-500 mb-1 block flex items-center gap-1">
+                          <CalendarDays className="w-3 h-3" /> 复查时间
+                        </label>
+                        <input
+                          type="text"
+                          value={reviewTime}
+                          onChange={(e) => setReviewTime(e.target.value)}
+                          placeholder="如：术后第7天上午9点 或 一周后（6月29日）"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-gray-500 mb-1 block flex items-center gap-1">
+                          <StickyNote className="w-3 h-3" /> 其他说明（可选）
+                        </label>
+                        <textarea
+                          value={additionalAdvice}
+                          onChange={(e) => setAdditionalAdvice(e.target.value)}
+                          placeholder="其他需要补充的叮嘱..."
+                          rows={2}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-gray-100">
+                      <p className="text-xs text-gray-500 mb-2 flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3" /> 整体处理总结
+                      </p>
+                      <textarea
+                        value={resolution}
+                        onChange={(e) => setResolution(e.target.value)}
+                        placeholder="简单描述整体处理结论..."
+                        rows={2}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                      />
+                    </div>
+
                     <button
                       onClick={() => handleResolve(selectedExceptionData.id)}
-                      disabled={!resolution.trim()}
-                      className="w-full mt-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                      disabled={!resolution.trim() && !dietAdvice.trim() && !medicationAdvice.trim() && !reviewTime.trim()}
+                      className="w-full mt-3 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      标记为已解决
+                      提交处置建议并标记已解决
                     </button>
                   </div>
                 )}
 
-                {selectedExceptionData.status === 'resolved' && selectedExceptionData.resolution && (
+                {selectedExceptionData.status === 'resolved' && (
                   <div className="mt-4 pt-4 border-t border-gray-100">
-                    <p className="text-sm text-gray-500 mb-2">处理结果</p>
-                    <p className="text-sm text-gray-700 bg-green-50 p-3 rounded-lg border border-green-200">
-                      {selectedExceptionData.resolution}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-2">
-                      解决时间：{formatDateTime(selectedExceptionData.resolvedAt!)}
-                    </p>
+                    {selectedExceptionData.doctorAdvice ? (
+                      <div className="space-y-3">
+                        <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                          <Stethoscope className="w-4 h-4 text-purple-600" />
+                          医生处置建议
+                        </p>
+
+                        {selectedExceptionData.doctorAdvice.dietAdvice && (
+                          <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+                            <p className="text-xs font-medium text-green-700 mb-1 flex items-center gap-1">
+                              <Utensils className="w-3 h-3" /> 饮食建议
+                            </p>
+                            <p className="text-sm text-gray-700">{selectedExceptionData.doctorAdvice.dietAdvice}</p>
+                          </div>
+                        )}
+
+                        {selectedExceptionData.doctorAdvice.medicationAdvice && (
+                          <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                            <p className="text-xs font-medium text-blue-700 mb-1 flex items-center gap-1">
+                              <Pill className="w-3 h-3" /> 用药建议
+                            </p>
+                            <p className="text-sm text-gray-700">{selectedExceptionData.doctorAdvice.medicationAdvice}</p>
+                          </div>
+                        )}
+
+                        {selectedExceptionData.doctorAdvice.reviewTime && (
+                          <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+                            <p className="text-xs font-medium text-amber-700 mb-1 flex items-center gap-1">
+                              <CalendarDays className="w-3 h-3" /> 复查时间
+                            </p>
+                            <p className="text-sm text-gray-700">{selectedExceptionData.doctorAdvice.reviewTime}</p>
+                          </div>
+                        )}
+
+                        {selectedExceptionData.doctorAdvice.additionalAdvice && (
+                          <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                            <p className="text-xs font-medium text-gray-700 mb-1 flex items-center gap-1">
+                              <StickyNote className="w-3 h-3" /> 其他说明
+                            </p>
+                            <p className="text-sm text-gray-700">{selectedExceptionData.doctorAdvice.additionalAdvice}</p>
+                          </div>
+                        )}
+
+                        {selectedExceptionData.resolution && (
+                          <div className="p-3 bg-purple-50 rounded-lg border border-purple-100">
+                            <p className="text-xs font-medium text-purple-700 mb-1 flex items-center gap-1">
+                              <MessageSquare className="w-3 h-3" /> 处理结论
+                            </p>
+                            <p className="text-sm text-gray-700">{selectedExceptionData.resolution}</p>
+                          </div>
+                        )}
+
+                        <p className="text-xs text-gray-400 pt-2">
+                          解决时间：{formatDateTime(selectedExceptionData.resolvedAt!)}
+                        </p>
+                      </div>
+                    ) : (
+                      selectedExceptionData.resolution && (
+                        <>
+                          <p className="text-sm text-gray-500 mb-2">处理结果</p>
+                          <p className="text-sm text-gray-700 bg-green-50 p-3 rounded-lg border border-green-200">
+                            {selectedExceptionData.resolution}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-2">
+                            解决时间：{formatDateTime(selectedExceptionData.resolvedAt!)}
+                          </p>
+                        </>
+                      )
+                    )}
                   </div>
                 )}
               </div>
